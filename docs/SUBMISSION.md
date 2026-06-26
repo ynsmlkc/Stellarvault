@@ -24,7 +24,7 @@ Stellar has no Gnosis Safe, and every fund movement on a public ledger is fully 
 Rust + Soroban SDK 23 · circom 2.2 + circomlib · snarkjs Groth16 (BN254) · Next.js 14 + React + TypeScript · Freighter · @stellar/stellar-sdk 16 (Protocol 23).
 
 ## Links
-- Repo: <add GitHub URL>
+- Repo: https://github.com/ynsmlkc/Stellarvault
 - Live Vault contract: https://stellar.expert/explorer/testnet/contract/CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM
 - Demo video: <add URL>
 
