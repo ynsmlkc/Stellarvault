@@ -1,0 +1,58 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: #0A0A0B;
+  color: #ECE7DD;
+  font-family: 'Hanken Grotesk', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01';
+  overflow-x: hidden;
+}
+
+::selection { background: #C9A86A; color: #0A0A0B; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0A0A0B; }
+::-webkit-scrollbar-thumb { background: #26241f; border-radius: 6px; border: 2px solid #0A0A0B; }
+::-webkit-scrollbar-thumb:hover { background: #3a362d; }
+
+input::placeholder { color: #5a564d; }
+input:focus { outline: none; }
+
+@keyframes vsGlow { 0%,100% { opacity:.45; transform:scale(1); } 50% { opacity:.8; transform:scale(1.04); } }
+@keyframes vsSpin { to { transform: rotate(360deg); } }
+@keyframes vsSpinR { to { transform: rotate(-360deg); } }
+@keyframes vsRise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+@keyframes vsPulseDot { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+@keyframes vsToast { from { opacity:0; transform:translate(-50%,12px); } to { opacity:1; transform:translate(-50%,0); } }
+
+.vs-rise { animation: vsRise .6s cubic-bezier(.2,.7,.2,1) both; }
+
+/* ---- hover behaviours (port of design's style-hover) ---- */
+.h-goldbtn { transition: background .18s, transform .18s; }
+.h-goldbtn:hover { background: #DCC089 !important; }
+.h-lift:hover { transform: translateY(-1px); }
+
+.h-ghost { transition: border-color .18s, background .18s; }
+.h-ghost:hover { border-color: rgba(201,168,106,0.5) !important; background: rgba(201,168,106,0.04) !important; }
+
+.h-navtext { transition: color .15s; }
+.h-navtext:hover { color: #ECE7DD !important; }
+
+.h-nav { transition: background .15s, color .15s; }
+.h-nav:hover { background: rgba(236,231,221,0.05) !important; color: #ECE7DD !important; }
+
+.h-card { transition: transform .2s, border-color .2s; }
+.h-card:hover { transform: translateY(-3px); border-color: rgba(236,231,221,0.2) !important; }
+.h-cardgold { transition: transform .2s, border-color .2s; }
+.h-cardgold:hover { transform: translateY(-3px); border-color: rgba(201,168,106,0.5) !important; }
+
+.h-x:hover { color: #C45D4A !important; }
+.h-addsigner:hover { border-color: rgba(201,168,106,0.4) !important; color: #C9A86A !important; }
+.h-thresh:hover { border-color: rgba(201,168,106,0.4) !important; }
+.h-copy:hover { color: #DCC089 !important; }
+.h-wallet { transition: background .18s; }
+.h-wallet:hover { background: rgba(201,168,106,0.13) !important; }
+.h-deposit:hover { border-color: rgba(201,168,106,0.5) !important; }
+.h-kit { transition: border-color .18s, color .18s; }
+.h-kit:hover { border-color: rgba(236,231,221,0.24) !important; color: #ECE7DD !important; }
+.h-history:hover { color: #ECE7DD !important; }

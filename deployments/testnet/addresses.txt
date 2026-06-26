@@ -1,0 +1,43 @@
+# Stellar Vault — Testnet Deployment
+
+Date: 2026-06-25
+Network: Testnet
+Deployer Account: GAEAII4H4RJOMCMJTVKUH5ZEJVAVT5CRFSRMMUZPNJG6BCYL7X2BOBUH
+Deployer Alias: deployer
+
+---
+
+## Nethermind Infrastructure
+
+VERIFIER_ID   = CDRMXX3O74B7S6UV47A6JRSUUUGQ6OYWG2NYDHJKZY4PTULZN7GAKL6V
+ASP_MEM_ID    = CA4N4LFE6EMPPHORRLJJGP3UDV2ENDFIWI3ZBA4GY6LFYJOB7GSEGJBD
+ASP_NONMEM_ID = CBWCSODWHCUFTO5SSHFGECRY4Z7SQCY5EFPOE375SUXNTEKWWUUP6UOM
+POOL_ID       = CCQRXA6UMVSPKRZDYGVS2G3E67INXML7EX5NZVFGC66E3FLJEGA5VTHY
+TOKEN (XLM)   = CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+
+---
+
+## Vault Contract
+
+VAULT_ID      = CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM
+VAULT_ID_OLD  = CBBBYFMRP2KX3FDYBQZTVVOIUKUS53RQW6SYYMXOTVAGKKOUTMGXURRK  (pool/token karisikligi vardi, terk edildi)
+
+Token slotu (transparent transfer): ✅  XLM SAC (CDLZFC3S...)
+Pool adresi (confidential, Faz 4): henuz set edilmedi
+
+### Faz 1 dogrulamasi (2026-06-26) — transparent akis testnet'te calisiyor ✅
+- create_vault(deployer, [deployer,signer1,signer2], threshold=2) -> vault_id 0
+- set_token = XLM SAC, vault'a 100 XLM yuklendi
+- propose(10 XLM -> testnet-account) -> approve(deployer) -> approve(signer1) -> execute
+- Sonuc: Vault 100->90 XLM, alici +10 XLM, executed=true, TransactionExecutedEvent yayildi
+
+---
+
+## Explorer Links
+
+- Verifier: https://stellar.expert/explorer/testnet/contract/CDRMXX3O74B7S6UV47A6JRSUUUGQ6OYWG2NYDHJKZY4PTULZN7GAKL6V
+- ASP Membership: https://stellar.expert/explorer/testnet/contract/CA4N4LFE6EMPPHORRLJJGP3UDV2ENDFIWI3ZBA4GY6LFYJOB7GSEGJBD
+- ASP Non-Membership: https://stellar.expert/explorer/testnet/contract/CBWCSODWHCUFTO5SSHFGECRY4Z7SQCY5EFPOE375SUXNTEKWWUUP6UOM
+- Pool: https://stellar.expert/explorer/testnet/contract/CCQRXA6UMVSPKRZDYGVS2G3E67INXML7EX5NZVFGC66E3FLJEGA5VTHY
+- Token (XLM): https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+- Vault: https://stellar.expert/explorer/testnet/contract/CBBBYFMRP2KX3FDYBQZTVVOIUKUS53RQW6SYYMXOTVAGKKOUTMGXURRK

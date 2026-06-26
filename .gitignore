@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+target/
+
+# Build
+dist/
+build/
+.next/
+
+# Environment
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Circom build artifacts
+circuits/build/
+*.zkey
+*.r1cs
+
+# Local config
+.claude/
