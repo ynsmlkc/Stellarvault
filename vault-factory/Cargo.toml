@@ -1,0 +1,21 @@
+[package]
+name = "vault-factory"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { version = "23.0" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+lto = true
+panic = "abort"
+codegen-units = 1

@@ -1,6 +1,8 @@
 // Stellar / Soroban configuration + helpers for Stellar Vault.
 
 export const CONFIG = {
+  factoryId: process.env.NEXT_PUBLIC_FACTORY_ID ?? "",
+  demoVault: process.env.NEXT_PUBLIC_DEMO_VAULT ?? "",
   vaultId: process.env.NEXT_PUBLIC_VAULT_CONTRACT_ID ?? "",
   tokenId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
   poolId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",

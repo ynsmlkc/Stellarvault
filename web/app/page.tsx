@@ -14,6 +14,7 @@ import {
   getVault,
   getVaultBalance,
   getProposals,
+  getMyVaults,
   createVault as createVaultTx,
   proposeTransaction,
   approve as approveTx,
@@ -36,25 +37,15 @@ const GRAD_B = "linear-gradient(135deg,#bda07f,#6f5b3d)";
 const GRAD_C = "linear-gradient(135deg,#a99272,#5e4e34)";
 const GRADS = [GRAD_A, GRAD_B, GRAD_C];
 
-const ACTIVE_VAULT = 0; // live demo runs against the deployed vault #0
-
-// per-wallet list of vaults the user created (so they persist across reloads)
-const myVaultsKey = (w: string) => `sv_vaults_${CONFIG.vaultId.slice(0, 8)}_${w}`;
-function loadMyVaults(w: string | null): number[] {
-  if (!w || typeof localStorage === "undefined") return [];
+// remember which (vault, tx) this wallet already approved → avoid re-click errors
+const apprKey = (v: string, t: number, w: string) => `sv_appr_${v}_${t}_${w}`;
+const didApprove = (v: string, t: number, w: string | null) =>
+  !!w && typeof localStorage !== "undefined" && localStorage.getItem(apprKey(v, t, w)) === "1";
+const markApproved = (v: string, t: number, w: string) => {
   try {
-    return JSON.parse(localStorage.getItem(myVaultsKey(w)) || "[]");
-  } catch {
-    return [];
-  }
-}
-function saveMyVault(w: string, id: number) {
-  const ids = loadMyVaults(w);
-  if (!ids.includes(id)) {
-    ids.push(id);
-    localStorage.setItem(myVaultsKey(w), JSON.stringify(ids));
-  }
-}
+    localStorage.setItem(apprKey(v, t, w), "1");
+  } catch {}
+};
 
 type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield";
 type Mode = "transparent" | "private";
@@ -110,21 +101,22 @@ export default function Page() {
   const [connecting, setConnecting] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // live chain data for the active vault
-  const [vaultId, setVaultId] = useState(ACTIVE_VAULT);
+  // live chain data for the active vault — each vault is its own contract address
+  const [vaultAddress, setVaultAddress] = useState<string>("");
   const [config, setConfig] = useState<VaultConfig | null>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const loadData = useCallback(async (id: number = vaultId) => {
+  const loadData = useCallback(async (addr: string = vaultAddress) => {
+    if (!addr) return;
     setLoading(true);
     try {
       const [c, b, p] = await Promise.all([
-        getVault(id),
-        getVaultBalance(id),
-        getProposals(id),
+        getVault(addr),
+        getVaultBalance(addr),
+        getProposals(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -134,7 +126,7 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
-  }, [vaultId]);
+  }, [vaultAddress]);
 
   useEffect(() => {
     getConnectedAddress().then((a) => a && setWallet(a));
@@ -148,12 +140,18 @@ export default function Page() {
     if (s === "vault" || s === "dashboard") loadData();
   };
 
-  // open a specific vault id (from the dashboard list) without stale reloads
-  const selectVault = (id: number) => {
-    setVaultId(id);
+  // re-read now AND after a few seconds — covers the RPC lag right after a write
+  const refreshSoon = () => {
+    loadData();
+    timers.current.push(setTimeout(() => loadData(), 4500));
+  };
+
+  // open a specific vault by address (from the dashboard list)
+  const selectVault = (addr: string) => {
+    setVaultAddress(addr);
     setScreen("vault");
     window.scrollTo(0, 0);
-    loadData(id);
+    loadData(addr);
   };
 
   const showToast = (t: ToastMsg) => {
@@ -203,12 +201,12 @@ export default function Page() {
     if (!w) return;
     setBusy("create");
     try {
-      const newId = await createVaultTx(w, name, signers, threshold);
-      saveMyVault(w, newId);
-      setVaultId(newId);
-      await loadData(newId);
-      go("vault");
-      showToast({ title: `Vault #${newId} created`, sub: "You own it — propose, approve and execute yourself.", tone: "ok" });
+      const newAddr = await createVaultTx(w, name, signers, threshold);
+      setVaultAddress(newAddr);
+      setScreen("vault"); // go straight to the NEW vault (go() would reload the stale address)
+      window.scrollTo(0, 0);
+      await loadData(newAddr); // getVault retries through the fresh-deploy RPC lag
+      showToast({ title: `${name} created`, sub: "Its own contract address & balance — deposit, propose, execute.", tone: "ok" });
     } catch (e: any) {
       showToast({ title: "Create failed", sub: cleanErr(e), tone: "err" });
     } finally {
@@ -230,7 +228,7 @@ export default function Page() {
     const priv = mode === "private";
     setBusy("propose");
     try {
-      await proposeTransaction(vaultId, w, target.trim(), stroops, priv);
+      await proposeTransaction(vaultAddress, w, target.trim(), stroops, priv);
       await loadData();
       go("vault");
       showToast({
@@ -265,7 +263,7 @@ export default function Page() {
     try {
       const secrets = await Promise.all(config.signers.map((a) => secretFromSeed(a)));
       const blindings = config.signers.map((_, i) => BigInt(i + 1));
-      const vId = BigInt(vaultId);
+      const vId = await secretFromSeed(vaultAddress); // circuit domain id derived from the vault address
       const txHash = await H([vId, BigInt(txId)]);
 
       setProofStage(1); // generating proof
@@ -274,11 +272,12 @@ export default function Page() {
       if (!ok) throw new Error("Local proof verification failed");
 
       setProofStage(2); // submitting on-chain
-      await approveZk(vaultId, txId, w, vp.proof, vp.publicSignals);
+      await approveZk(vaultAddress, txId, w, vp.proof, vp.publicSignals);
 
       setProof(false);
       setProofStage(0);
-      await loadData();
+      markApproved(vaultAddress, txId, w);
+      refreshSoon();
       showToast({
         title: "Anonymous approval submitted",
         sub: `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · voter identity hidden`,
@@ -295,13 +294,14 @@ export default function Page() {
     const w = requireWallet();
     if (!w) return;
     if (config && !config.signers.includes(w)) {
-      showToast({ title: "Not a signer of this vault", sub: `Your wallet isn't a signer of vault #${vaultId}. Create your own vault to approve.`, tone: "err" });
+      showToast({ title: "Not a signer of this vault", sub: "Your wallet isn't a signer here. Create your own vault to approve.", tone: "err" });
       return;
     }
     setBusy(`approve-${txId}`);
     try {
-      await approveTx(vaultId, txId, w);
-      await loadData();
+      await approveTx(vaultAddress, txId, w);
+      markApproved(vaultAddress, txId, w);
+      refreshSoon();
       showToast({ title: "Approval signed", sub: `Proposal #${txId} approved on-chain.`, tone: "ok" });
     } catch (e: any) {
       showToast({ title: "Approve failed", sub: cleanErr(e), tone: "err" });
@@ -316,11 +316,11 @@ export default function Page() {
     const priv = proposals.find((p) => p.id === txId)?.private_mode;
     setBusy(`execute-${txId}`);
     try {
-      await executeTx(vaultId, txId, w);
-      await loadData();
+      await executeTx(vaultAddress, txId, w);
+      refreshSoon();
       showToast(
         priv
-          ? { title: "Private transaction finalized", sub: "Approved & sealed. Confidential transfer settles in the Pool layer (next).", tone: "ok" }
+          ? { title: "Private transaction executed", sub: "Funds moved on-chain — but the chain never learned who approved (ZK).", tone: "ok" }
           : { title: "Transaction executed", sub: `Funds moved on-chain · proposal #${txId}.`, tone: "ok" }
       );
     } catch (e: any) {
@@ -335,7 +335,7 @@ export default function Page() {
     if (!w) return;
     setBusy("deposit");
     try {
-      await depositToVault(vaultId, w, parseAmountToStroops("100"));
+      await depositToVault(vaultAddress, w, parseAmountToStroops("100"));
       await loadData();
       showToast({ title: "Deposited 100 XLM", sub: "Vault balance updated.", tone: "ok" });
     } catch (e: any) {
@@ -349,12 +349,12 @@ export default function Page() {
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
-      {screen === "landing" && <Landing onConnect={() => go("connect")} onVault={() => go("vault")} balance={balance} />}
+      {screen === "landing" && <Landing onConnect={() => go("connect")} onVault={() => go("connect")} balance={balance} />}
       {screen === "connect" && <Connect onBack={() => go("landing")} onConnect={handleConnect} connecting={connecting} />}
       {isApp && (
         <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} wallet={wallet}
-          vaultId={vaultId} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onDeposit={doDeposit} onOpenVault={selectVault} />
+          vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
+          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -422,14 +422,14 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           </p>
           <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 16, padding: "15px 28px", border: "none", borderRadius: 9, cursor: "pointer", boxShadow: "0 8px 30px rgba(201,168,106,0.26)" }}>Get Started <span>↗</span></button>
-            <button onClick={onVault} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>Explore a live vault →</button>
+            <button onClick={onVault} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>Create your treasury →</button>
           </div>
           <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: 12, color: "#5a564d" }}>
-            <div><span style={{ color: "#8A857B" }}>CONTRACT</span> &nbsp;{shortContract(CONFIG.vaultId)}</div>
+            <div><span style={{ color: "#8A857B" }}>CONTRACT</span> &nbsp;{shortContract(CONFIG.factoryId)}</div>
             <div style={{ width: 1, height: 14, background: "rgba(236,231,221,0.12)" }} />
             <div><span style={{ color: "#8A857B" }}>NETWORK</span> &nbsp;Testnet · live</div>
             <div style={{ width: 1, height: 14, background: "rgba(236,231,221,0.12)" }} />
-            <div><span style={{ color: "#8A857B" }}>BALANCE</span> &nbsp;{balance != null ? `${formatXLM(balance)} XLM` : "Groth16"}</div>
+            <div><span style={{ color: "#8A857B" }}>PROOFS</span> &nbsp;Groth16</div>
           </div>
         </div>
       </div>
@@ -518,9 +518,9 @@ function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConn
 /* ============================ APP SHELL ============================ */
 type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
-  submitPropose: (target: string, amount: string) => void; wallet: string | null; vaultId: number;
+  submitPropose: (target: string, amount: string) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onOpenVault: (id: number) => void;
+  onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -553,9 +553,9 @@ function AppShell(p: ShellProps) {
       </div>
 
       <div style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
-        {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultId={p.vaultId} onOpenVault={p.onOpenVault} />}
+        {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultId={p.vaultId} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onDeposit={p.onDeposit} />}
+        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} busy={p.busy} balance={p.balance} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
@@ -564,41 +564,37 @@ function AppShell(p: ShellProps) {
 }
 
 /* ============================ DASHBOARD ============================ */
-function Dashboard({ go, wallet, balance, proposals, vaultId, onOpenVault }: { go: (s: Screen) => void; wallet: string | null; balance: bigint | null; proposals: Proposal[]; vaultId: number; onOpenVault: (id: number) => void }) {
+function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }: { go: (s: Screen) => void; wallet: string | null; balance: bigint | null; proposals: Proposal[]; vaultAddress: string; onOpenVault: (addr: string) => void }) {
   const pending = proposals.filter((x) => !x.executed).length;
-  const [myVaults, setMyVaults] = useState<{ id: number; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
-  const [demo, setDemo] = useState<{ name: string; threshold: number; signers: number; balance: bigint } | null>(null);
+  const [myVaults, setMyVaults] = useState<{ address: string; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
+  const [loadingVaults, setLoadingVaults] = useState(true);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [c, b] = await Promise.all([getVault(0), getVaultBalance(0)]);
-        if (alive) setDemo({ name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b });
-      } catch {}
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const ids = loadMyVaults(wallet);
-    if (!ids.length) {
+    if (!wallet) {
       setMyVaults([]);
+      setLoadingVaults(false);
       return;
     }
     let alive = true;
-    Promise.all(
-      ids.map(async (id) => {
-        try {
-          const [c, b] = await Promise.all([getVault(id), getVaultBalance(id)]);
-          return { id, name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b };
-        } catch {
-          return null;
-        }
-      })
-    ).then((r) => alive && setMyVaults(r.filter(Boolean) as any));
+    setLoadingVaults(true);
+    (async () => {
+      try {
+        const addrs = (await getMyVaults(wallet)).filter((a) => a !== CONFIG.demoVault);
+        const items = await Promise.all(
+          addrs.map(async (address) => {
+            try {
+              const [c, b] = await Promise.all([getVault(address), getVaultBalance(address)]);
+              return { address, name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b };
+            } catch {
+              return null;
+            }
+          })
+        );
+        if (alive) setMyVaults(items.filter(Boolean) as any);
+      } finally {
+        if (alive) setLoadingVaults(false);
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -614,8 +610,8 @@ function Dashboard({ go, wallet, balance, proposals, vaultId, onOpenVault }: { g
         <button onClick={() => go("create")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "12px 18px", border: "none", borderRadius: 9, cursor: "pointer" }}><span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Create New Vault</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
-        <Stat label="Current vault balance" valueNode={<>{balance != null ? formatXLM(balance) : "—"} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
-        <Stat label="Your vaults" valueNode={<>{myVaults.length}</>} />
+        <Stat label="Total balance" valueNode={<>{loadingVaults ? "…" : formatXLM(myVaults.reduce((s, v) => s + v.balance, 0n))} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
+        <Stat label="Your vaults" valueNode={<>{loadingVaults ? "…" : myVaults.length}</>} />
         <Stat label="Pending (current vault)" valueNode={<span style={{ color: "#C9A86A" }}>{pending}</span>} gold />
       </div>
 
@@ -623,20 +619,17 @@ function Dashboard({ go, wallet, balance, proposals, vaultId, onOpenVault }: { g
         <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>YOUR VAULTS</div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
-        {myVaults.map((v) => (
-          <VaultCard key={v.id} onClick={() => onOpenVault(v.id)} name={v.name || `Vault #${v.id}`} id={`#${v.id} · ${shortContract(CONFIG.vaultId)}`} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.id === vaultId} live />
+        {loadingVaults && wallet && [0, 1, 2].map((i) => <VaultCardSkeleton key={i} />)}
+        {!loadingVaults && myVaults.map((v) => (
+          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live />
         ))}
-        {!myVaults.length && wallet && (
+        {!loadingVaults && !myVaults.length && wallet && (
           <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
-            No vaults yet. Click <span style={{ color: "#C9A86A" }}>“Create New Vault”</span> — it’ll appear here and stay across reloads.
+            No vaults yet. Click <span style={{ color: "#C9A86A" }}>“Create New Vault”</span> — each one is its own contract, recorded on-chain.
           </div>
         )}
       </div>
 
-      <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>DEMO VAULT (read-only)</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18 }}>
-        <VaultCard onClick={() => onOpenVault(0)} name={demo?.name || "Orbital Treasury"} id={`#0 · ${shortContract(CONFIG.vaultId)}`} threshold={demo ? `${demo.threshold} / ${demo.signers}` : "2 / 3"} balance={demo ? formatXLM(demo.balance) : "—"} avatars={Array.from({ length: demo?.signers ?? 3 }, (_, i) => letterFor(i))} gold={vaultId === 0} />
-      </div>
     </div>
   );
 }
@@ -648,6 +641,20 @@ function Stat({ label, valueNode, gold }: { label: string; valueNode: React.Reac
     </div>
   );
 }
+function VaultCardSkeleton() {
+  const bar = (w: string | number, h = 12) => <div style={{ width: w, height: h, borderRadius: 5, background: "rgba(236,231,221,0.06)", animation: "vsShimmer 1.4s ease-in-out infinite" }} />;
+  return (
+    <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 15, background: "#121211", padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{bar(120, 15)}{bar(70)}</div>
+        {bar(44, 18)}
+      </div>
+      <div style={{ marginBottom: 18 }}>{bar(110, 22)}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>{bar(70, 22)}{bar(60)}</div>
+    </div>
+  );
+}
+
 function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void }) {
   return (
     <div onClick={onClick} className={gold ? "h-cardgold" : "h-card"} style={{ position: "relative", border: gold ? "1px solid rgba(201,168,106,0.24)" : "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: gold ? "linear-gradient(180deg,#15140f,#111110)" : "#121211", padding: 24, cursor: "pointer", overflow: "hidden" }}>
@@ -746,9 +753,9 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, wallet, onApprove, onApproveZk, onExecute, onDeposit }: {
-  go: (s: Screen) => void; vaultId: number; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void;
+function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, onApprove, onApproveZk, onExecute, onDeposit, onRefresh }: {
+  go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
+  onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
   const signers = config?.signers ?? [];
@@ -766,14 +773,14 @@ function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, w
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-              <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || `Vault #${vaultId}`}</h1>
+              <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || "Vault"}</h1>
               <span style={{ fontFamily: MONO, fontSize: 11, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.32)", borderRadius: 6, padding: "4px 9px" }}>{threshold} / {config?.signer_count ?? signers.length} threshold</span>
               <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "2px 6px" }}>LIVE · TESTNET</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 12, color: "#8A857B" }}>
-              {shortAddr(CONFIG.vaultId, 8, 9)}
-              <span className="h-copy" style={{ cursor: "pointer", color: "#C9A86A" }} onClick={() => navigator.clipboard?.writeText(CONFIG.vaultId)}>⧉ copy</span>
-              <a className="h-copy" href={contractExplorerUrl(CONFIG.vaultId)} target="_blank" rel="noreferrer" style={{ cursor: "pointer", color: "#C9A86A", textDecoration: "none" }}>↗ explorer</a>
+              {shortAddr(vaultAddress, 8, 9)}
+              <span className="h-copy" style={{ cursor: "pointer", color: "#C9A86A" }} onClick={() => navigator.clipboard?.writeText(vaultAddress)}>⧉ copy</span>
+              <a className="h-copy" href={contractExplorerUrl(vaultAddress)} target="_blank" rel="noreferrer" style={{ cursor: "pointer", color: "#C9A86A", textDecoration: "none" }}>↗ explorer</a>
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -791,6 +798,7 @@ function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, w
             <span style={{ fontSize: 13, color: "#8A857B" }}>{config?.signer_count ?? signers.length} signers</span>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onRefresh} disabled={loading} className="h-deposit" title="Refresh from chain" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#8A857B", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 9, padding: "11px 14px", fontFamily: SANS, fontSize: 14, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>↻</button>
             <button onClick={onDeposit} disabled={busy === "deposit"} className="h-deposit" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 500, cursor: "pointer", opacity: busy === "deposit" ? 0.6 : 1 }}>{busy === "deposit" ? "Depositing…" : "↓ Deposit 100"}</button>
             <button onClick={() => go("propose")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>+ New Transaction</button>
           </div>
@@ -807,7 +815,7 @@ function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, w
                 <span onClick={() => setTab("history")} className="h-history" style={{ color: tab === "history" ? "#ECE7DD" : "#8A857B", padding: "4px 10px", cursor: "pointer" }}>History {history.length}</span>
               </div>
             </div>
-            <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>live · vault #{vaultId}</span>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>live · {shortContract(vaultAddress)}</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -815,8 +823,8 @@ function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, w
             {!loading && !list.length && <Empty label={tab === "pending" ? "No pending transactions. Propose one." : "No history yet."} />}
             {list.map((p) =>
               p.private_mode
-                ? <PrivateTx key={p.id} p={p} threshold={threshold} busy={busy} onApproveZk={onApproveZk} onExecute={onExecute} />
-                : <TransparentTx key={p.id} p={p} threshold={threshold} busy={busy} onApprove={onApprove} onExecute={onExecute} />
+                ? <PrivateTx key={p.id} p={p} threshold={threshold} busy={busy} iApproved={didApprove(vaultAddress, p.id, wallet)} onApproveZk={onApproveZk} onExecute={onExecute} />
+                : <TransparentTx key={p.id} p={p} threshold={threshold} busy={busy} iApproved={didApprove(vaultAddress, p.id, wallet)} onApprove={onApprove} onExecute={onExecute} />
             )}
           </div>
         </div>
@@ -881,7 +889,7 @@ function ApprovalDots({ count, threshold, gold }: { count: number; threshold: nu
   );
 }
 
-function TransparentTx({ p, threshold, busy, onApprove, onExecute }: { p: Proposal; threshold: number; busy: string | null; onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, busy, iApproved, onApprove, onExecute }: { p: Proposal; threshold: number; busy: string | null; iApproved: boolean; onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   return (
     <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: p.executed ? 0.78 : 1 }}>
@@ -902,14 +910,16 @@ function TransparentTx({ p, threshold, busy, onApprove, onExecute }: { p: Propos
         {!p.executed && (
           ready
             ? <button onClick={() => onExecute(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
-            : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : "Approve"}</button>
+            : iApproved
+              ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
+              : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : "Approve"}</button>
         )}
       </div>
     </div>
   );
 }
 
-function PrivateTx({ p, threshold, busy, onApproveZk, onExecute }: { p: Proposal; threshold: number; busy: string | null; onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, busy, iApproved, onApproveZk, onExecute }: { p: Proposal; threshold: number; busy: string | null; iApproved: boolean; onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   return (
     <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: p.executed ? 0.8 : 1 }}>
@@ -921,8 +931,8 @@ function PrivateTx({ p, threshold, busy, onApproveZk, onExecute }: { p: Proposal
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><Blurred>{shortAddr(p.target)}</Blurred><span style={{ fontSize: 12 }}>🔒</span></div></div>
-        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Amount</div><div style={{ display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "flex-end" }}><Blurred>{formatXLM(p.amount)} XLM</Blurred><span style={{ fontSize: 12 }}>🔒</span></div></div>
+        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.target)}</div></div>
+        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Amount</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
       </div>
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
@@ -931,7 +941,9 @@ function PrivateTx({ p, threshold, busy, onApproveZk, onExecute }: { p: Proposal
         {!p.executed && (
           ready
             ? <button onClick={() => onExecute(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
-            : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>
+            : iApproved
+              ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>✓ You approved · waiting</span>
+              : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>
         )}
       </div>
     </div>
@@ -978,8 +990,8 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
             <div className="vs-rise" style={{ display: "flex", gap: 12, border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
               <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
               <div>
-                <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>This transfer will be confidential</div>
-                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Signer identities, the amount and the recipient are sealed with a zero-knowledge proof. Only a validity proof and nullifiers reach the chain.</div>
+                <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>Approver identities will be hidden</div>
+                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount &amp; recipient (they approve it), but each approval is a zero-knowledge proof — the chain records only a nullifier, never <span style={{ color: "#ECE7DD" }}>who</span> signed. To also hide the amount &amp; recipient from everyone, use the 🔒 Confidential pool.</div>
               </div>
             </div>
           )}
@@ -1006,10 +1018,10 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
               <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🔒 PRIVATE · ZK</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label="Recipient" valueNode={<Blurred>{target ? shortAddr(target) : "G…"}</Blurred>} />
-                <Row label="Amount" valueNode={<Blurred>{amount || "0.00"} XLM</Blurred>} />
+                <Row label="Recipient" value={target ? shortAddr(target) : "G…"} mono />
+                <Row label="Amount" value={`${amount || "0.00"} XLM`} mono />
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
-                <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 identities hidden</span>} />
+                <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
               <div style={{ position: "relative", marginTop: 16, display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 10, color: "#8A857B" }}>
                 <Pill>ZK · Groth16</Pill><Pill>nullifier-gated</Pill>

@@ -3,7 +3,7 @@
 > **The first multi-signature treasury on Stellar where each transaction can be transparent _or_ private.**
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
-[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7)
+[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
 [![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2023-C9A86A)](stellar-vault/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
 
@@ -11,23 +11,41 @@
 
 ## The problem
 
-On Ethereum, **Gnosis Safe** made multi-sig (m-of-n) treasury management the standard for DAOs and teams. Stellar has **no equivalent**. Worse — every fund movement on a public ledger is fully transparent: who proposed, who approved, how much, and to whom is visible to everyone.
+Stellar already has multi-sig — **natively** (account-level signers + thresholds) and through products like **LOBSTR Vault**, **Solar**, and **StellarGuard**. But every one of them shares two limits:
 
-For payroll, OTC deals, grants, or treasury rebalancing, that transparency is a liability.
+1. **Fully transparent.** On a public ledger, every fund movement reveals who proposed, **who approved**, how much, and to whom. For payroll, OTC deals, grants, or treasury rebalancing, that's a liability — it leaks salaries, strategy, and counterparties.
+2. **Native = not programmable.** Native multi-sig is a fixed protocol feature — signers, weights, thresholds, nothing more. You cannot add custom on-chain logic (spending limits, time-locks, modules, or zero-knowledge).
+
+There is no **confidential** multi-sig on Stellar, and no programmable one. That's the gap.
 
 ## The solution
 
-A Soroban multi-sig wallet where **the initiator picks the privacy level per transaction**:
+A Soroban **smart-contract** multi-sig where the initiator picks the privacy level **per transaction** — plus a shielded pool for fully confidential transfers:
 
-| | **Transparent mode** | **Private (ZK) mode** |
+| | **Transparent** | **Private (ZK)** |
 |---|---|---|
 | Who proposed | ✅ Visible | ✅ Visible |
-| **Who approved** | ✅ Visible (Alice, Bob…) | 🔒 **Hidden** — ZK proof: "a valid signer approved" |
-| **Amount** | ✅ Public | 🔒 **Hidden** _(roadmap: confidential execution)_ |
-| **Recipient** | ✅ Public | 🔒 **Hidden** _(roadmap: confidential execution)_ |
-| Feel | A public bank statement | A frosted-glass vault receipt |
+| **Who approved** | ✅ Visible (Alice, Bob…) | 🔒 **Hidden** — a ZK proof: "a valid signer approved", chain records only a nullifier |
+| Amount / Recipient | ✅ Public | Visible to co-signers (they approve it), public on-chain |
+| Feel | A public bank statement | An anonymously-signed payment |
+
+**Voter privacy** (above) hides *who approved*. For a transfer where the **amount + recipient** are hidden from everyone — and the deposit↔recipient link is severed — there's a separate **shielded pool** (our own `confidentialTransfer` circuit).
 
 Same vault, same threshold — **you decide what the chain is allowed to see.**
+
+---
+
+## Why a smart-contract vault — not native multi-sig
+
+Stellar's native multi-sig (and the wallets built on it — LOBSTR Vault, Solar, StellarGuard) is a **fixed protocol primitive**: it counts signatures against a threshold, and that's all. It **cannot run custom logic**. Stellar Vault is a **Soroban smart contract**, which is exactly what makes the rest possible:
+
+- **Zero-knowledge approvals** — verifying + recording a Groth16 nullifier on approval is logic a native account simply cannot execute.
+- **Confidential execution** — moving funds through a shielded pool needs a programmable contract.
+- **A factory, one contract per vault** — each vault is its own deployed contract (own address, own native balance), Gnosis-Safe-style.
+
+The transparent products prove the **demand** for multi-sig on Stellar. We add the two things native multi-sig structurally can't: **privacy** and **programmability**.
+
+> LOBSTR Vault is "Stellar's signing app." Stellar Vault is "Stellar's **confidential, programmable** Safe."
 
 ---
 
@@ -39,9 +57,9 @@ Same vault, same threshold — **you decide what the chain is allowed to see.**
 | **Transparent flow** | ✅ **Fully working** | propose → approve → execute moves **real XLM** on testnet, wallet-signed |
 | **ZK voter privacy** | ✅ **Real ZK** | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), real Groth16 proofs generated **in-browser**, `approve_zk` records the nullifier on-chain — identity hidden in the event, double-vote prevented |
 | **dApp frontend** | ✅ **Working** | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI |
-| **Per-vault balances + naming** | ✅ **Live** | each vault has its own name + segregated balance (`deposit` / `get_vault_balance`); production roadmap = Safe-style factory (one contract per vault) |
+| **Safe-style factory — one contract per vault** | ✅ **Live** | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture |
 | **Confidential transfers (shielded pool)** | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed |
-| **On-chain Groth16 verify** | 🚧 **Roadmap** | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step (BN254 host fns are still draft on testnet — CAP-0074) |
+| **On-chain Groth16 verify** | 🚧 **Roadmap** | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step — now unblocked by the Jan-2026 "X-Ray" upgrade (BN254 + Poseidon host functions on Soroban) |
 
 > **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
 
@@ -85,12 +103,13 @@ Same vault, same threshold — **you decide what the chain is allowed to see.**
 
 | Contract | ID |
 |---|---|
-| **Vault** | `CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7` |
+| **Vault Factory** (deploys one contract per vault) | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
 | **Shield Pool** (our confidential layer) | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
 | Token (XLM SAC) | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
-| Nethermind Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…` |
+| Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…` |
 
-🔭 [View the Vault on stellar.expert](https://stellar.expert/explorer/testnet/contract/CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7)
+Each vault is its own contract, deployed by the factory — view a vault by its address on stellar.expert.
+🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
 
 ---
 
@@ -146,9 +165,12 @@ Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier i
 
 ## Roadmap
 
-- **Confidential execution** — wire `execute_confidential` → Nethermind Pool `transact()` to hide amount + recipient (UTXO commitments + encrypted outputs).
-- **On-chain Groth16 verifier** — deploy a verifier keyed to `voteApproval`'s VK + store `signerRoot` in the vault to bind membership on-chain.
-- **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the event already hides it).
+Because each vault is a programmable smart contract (not native multi-sig), it's the right foundation for Gnosis-Safe-style extensibility — things native multi-sig structurally can't add:
+
+- **Safe-style modules & guards** — spending limits, daily caps, role-based access, time-locks, transaction simulation before signing, batched multi-call transactions, session keys, social recovery.
+- **On-chain Groth16 verifier** — deploy a verifier keyed to our circuits' VK + bind the signer Merkle root in the vault (now unblocked by the X-Ray BN254/Poseidon host functions).
+- **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the on-chain event already hides it).
+- **Confidential execution inside the vault** — wire the shielded pool directly into a private `execute` so amount + recipient are hidden by default.
 - DeFi integrations, mobile, production audit.
 
 ---
@@ -156,11 +178,14 @@ Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier i
 ## Repository layout
 
 ```
-stellar-vault/   Soroban multi-sig contract (Rust) + tests
-circuits/        voteApproval.circom + Groth16 setup + prove/verify test
+vault-factory/   Soroban factory — deploys one vault contract per vault (+ owner→vaults registry)
+vault-instance/  Soroban single-vault contract (own address + native balance, approve / approve_zk / execute)
+shield-pool/     Soroban shielded pool for confidential transfers
+circuits/        voteApproval.circom (voter privacy) + confidentialTransfer.circom + Groth16 setup + tests
 web/             Next.js 14 dApp (Vault Gold UI, Freighter, snarkjs prover)
 deployments/     testnet addresses
-docs/            architecture, ZK, Nethermind integration, hackathon plan
+docs/            architecture, ZK, A-plan roadmap, hackathon plan, submission kit
+stellar-vault/   earlier single-contract design (the "B" approach) — kept for the migration story
 ```
 
 ---

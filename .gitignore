@@ -26,3 +26,6 @@ circuits/build/
 
 # Local config
 .claude/
+
+# throwaway deployer-API spike
+spike/

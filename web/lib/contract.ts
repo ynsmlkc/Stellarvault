@@ -62,8 +62,24 @@ async function simulate(contractId: string, method: string, args: xdr.ScVal[]): 
   return scValToNative(sim.result.retval);
 }
 
-export async function getVault(vaultId: number): Promise<VaultConfig> {
-  const v = await simulate(CONFIG.vaultId, "get_vault", [u64(vaultId)]);
+// Each vault is its OWN contract (Safe-style). `vaultAddr` is the instance address.
+
+/** Reads on a freshly-deployed instance can lag the RPC — retry a few times. */
+async function simulateRetry(contractId: string, method: string, args: xdr.ScVal[], tries = 6): Promise<any> {
+  let last: any;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await simulate(contractId, method, args);
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  }
+  throw last;
+}
+
+export async function getVault(vaultAddr: string): Promise<VaultConfig> {
+  const v = await simulateRetry(vaultAddr, "get_config", []);
   return {
     owner: v.owner,
     name: v.name,
@@ -73,20 +89,13 @@ export async function getVault(vaultId: number): Promise<VaultConfig> {
   };
 }
 
-/** Per-vault balance (each vault has its own, like a Safe). */
-export async function getVaultBalance(vaultId: number): Promise<bigint> {
-  const bal = await simulate(CONFIG.vaultId, "get_vault_balance", [u64(vaultId)]);
-  return BigInt(bal);
+/** Per-vault balance — native (the instance's own token balance, like a Safe). */
+export async function getVaultBalance(vaultAddr: string): Promise<bigint> {
+  return BigInt(await simulate(vaultAddr, "get_balance", []));
 }
 
-/** Total XLM held by the vault contract across all vaults (for the landing stat). */
-export async function getContractBalance(): Promise<bigint> {
-  const bal = await simulate(CONFIG.tokenId, "balance", [addr(CONFIG.vaultId)]);
-  return BigInt(bal);
-}
-
-export async function getProposal(vaultId: number, txId: number): Promise<Proposal> {
-  const p = await simulate(CONFIG.vaultId, "get_proposal_fn", [u64(vaultId), u64(txId)]);
+export async function getProposal(vaultAddr: string, txId: number): Promise<Proposal> {
+  const p = await simulate(vaultAddr, "get_proposal", [u64(txId)]);
   return {
     id: Number(p.id),
     target: p.target,
@@ -99,16 +108,26 @@ export async function getProposal(vaultId: number, txId: number): Promise<Propos
   };
 }
 
-export async function getProposals(vaultId: number, max = 16): Promise<Proposal[]> {
+export async function getProposals(vaultAddr: string, max = 16): Promise<Proposal[]> {
   const out: Proposal[] = [];
   for (let i = 0; i < max; i++) {
     try {
-      out.push(await getProposal(vaultId, i));
+      out.push(await getProposal(vaultAddr, i));
     } catch {
-      break; // first missing tx_id ends the list
+      break;
     }
   }
   return out;
+}
+
+/** Vault addresses this owner created (factory's on-chain registry). */
+export async function getMyVaults(owner: string): Promise<string[]> {
+  try {
+    const list = await simulate(CONFIG.factoryId, "get_vaults", [addr(owner)]);
+    return (list ?? []) as string[];
+  } catch {
+    return [];
+  }
 }
 
 /* ---------------- writes (Freighter-signed) ---------------- */
@@ -126,7 +145,21 @@ async function invoke(
     .setTimeout(60)
     .build();
 
-  const prepared = await server.prepareTransaction(built);
+  // prepareTransaction (simulation) can fail transiently on a freshly-active
+  // contract / RPC lag — retry a few times BEFORE asking the wallet to sign.
+  let prepared: any;
+  let prepErr: any;
+  for (let i = 0; i < 4; i++) {
+    try {
+      prepared = await server.prepareTransaction(built);
+      break;
+    } catch (e) {
+      prepErr = e;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  if (!prepared) throw prepErr;
+
   const signed = await freighter.signTransaction(prepared.toXDR(), {
     networkPassphrase: NETWORK_PASSPHRASE,
     address: source,
@@ -134,19 +167,28 @@ async function invoke(
   if ((signed as any).error) throw new Error((signed as any).error);
 
   const signedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, NETWORK_PASSPHRASE);
-  const sent = await server.sendTransaction(signedTx);
-  if (sent.status === "ERROR") throw new Error("Transaction submission failed");
 
-  // poll for completion
+  // send, retrying transient "try again later" / network blips a couple times
+  let sent = await server.sendTransaction(signedTx);
+  for (let i = 0; i < 3 && (sent.status === "TRY_AGAIN_LATER" || (sent.status as string) === "ERROR"); i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    sent = await server.sendTransaction(signedTx);
+  }
+  if (sent.status === "ERROR") throw new Error("Network rejected the transaction — try again.");
+
+  // poll until included — testnet RPC can lag, so give it up to ~75s
   let attempts = 0;
   let res = await server.getTransaction(sent.hash);
-  while (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 30) {
+  while (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 75) {
     await new Promise((r) => setTimeout(r, 1000));
     res = await server.getTransaction(sent.hash);
     attempts++;
   }
+  if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
+    throw new Error("Still confirming — it may have gone through. Hit ↻ refresh in a moment.");
+  }
   if (res.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-    throw new Error(`Transaction failed: ${res.status}`);
+    throw new Error(`Transaction failed on-chain: ${res.status}`);
   }
   const returnValue =
     res.status === rpc.Api.GetTransactionStatus.SUCCESS && (res as any).returnValue
@@ -155,36 +197,28 @@ async function invoke(
   return { hash: sent.hash, returnValue };
 }
 
-/** Creates a vault and returns the new vault id (u64) from the contract. */
-export async function createVault(owner: string, name: string, signers: string[], threshold: number): Promise<number> {
+/** Deploy a fresh vault via the factory; returns the new vault's address. */
+export async function createVault(owner: string, name: string, signers: string[], threshold: number): Promise<string> {
   const { returnValue } = await invoke(
-    CONFIG.vaultId,
+    CONFIG.factoryId,
     "create_vault",
     [addr(owner), str(name), addrVec(signers), u32(threshold)],
     owner
   );
-  return Number(returnValue ?? 0);
+  return String(returnValue);
 }
 
-export const setToken = (caller: string) =>
-  invoke(CONFIG.vaultId, "set_token", [addr(caller), addr(CONFIG.tokenId)], caller);
-
 export const proposeTransaction = (
-  vaultId: number,
+  vaultAddr: string,
   proposer: string,
   target: string,
   amountStroops: bigint,
   privateMode: boolean
 ) =>
-  invoke(
-    CONFIG.vaultId,
-    "propose_transaction",
-    [u64(vaultId), addr(proposer), addr(target), i128(amountStroops), bool(privateMode)],
-    proposer
-  );
+  invoke(vaultAddr, "propose", [addr(proposer), addr(target), i128(amountStroops), bool(privateMode)], proposer);
 
-export const approve = (vaultId: number, txId: number, signer: string) =>
-  invoke(CONFIG.vaultId, "approve", [u64(vaultId), u64(txId), addr(signer)], signer);
+export const approve = (vaultAddr: string, txId: number, signer: string) =>
+  invoke(vaultAddr, "approve", [u64(txId), addr(signer)], signer);
 
 /* ---- ZK approval (private mode) ---- */
 function fieldTo32(dec: string): Uint8Array {
@@ -205,24 +239,24 @@ function proofTo256(proof: any): Uint8Array {
   return out;
 }
 
-/** Submit a real Groth16 proof + nullifier to approve_zk (identity hidden on-chain). */
-export function approveZk(vaultId: number, txId: number, signer: string, proof: any, publicSignals: string[]) {
+/** Submit a real Groth16 proof + nullifier to the instance's approve_zk (identity hidden). */
+export function approveZk(vaultAddr: string, txId: number, signer: string, proof: any, publicSignals: string[]) {
   const entry = (k: string, v: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
+  // vault-instance ZKApproval = { nullifier, proof, public_inputs } (keys sorted)
   const zkApproval = xdr.ScVal.scvMap([
     entry("nullifier", nativeToScVal(BigInt(publicSignals[3]), { type: "u256" })),
     entry("proof", nativeToScVal(proofTo256(proof))),
     entry("public_inputs", xdr.ScVal.scvVec(publicSignals.map((s) => nativeToScVal(fieldTo32(s))))),
-    entry("tx_id", u64(txId)),
   ]);
-  return invoke(CONFIG.vaultId, "approve_zk", [u64(vaultId), u64(txId), addr(signer), zkApproval], signer);
+  return invoke(vaultAddr, "approve_zk", [u64(txId), addr(signer), zkApproval], signer);
 }
 
-export const execute = (vaultId: number, txId: number, executor: string) =>
-  invoke(CONFIG.vaultId, "execute", [u64(vaultId), u64(txId), addr(executor)], executor);
+export const execute = (vaultAddr: string, txId: number, executor: string) =>
+  invoke(vaultAddr, "execute", [u64(txId), addr(executor)], executor);
 
-/** Deposit XLM into a specific vault's own balance. */
-export const depositToVault = (vaultId: number, from: string, amountStroops: bigint) =>
-  invoke(CONFIG.vaultId, "deposit", [u64(vaultId), addr(from), i128(amountStroops)], from);
+/** Deposit = a plain token transfer to the vault's own address (Safe-style). */
+export const depositToVault = (vaultAddr: string, from: string, amountStroops: bigint) =>
+  invoke(CONFIG.tokenId, "transfer", [addr(from), addr(vaultAddr), i128(amountStroops)], from);
 
 /* ---------------- shield pool (confidential transfer) ---------------- */
 const u256 = (n: bigint) => nativeToScVal(n, { type: "u256" });
