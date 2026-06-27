@@ -3,7 +3,7 @@
 use soroban_sdk::{
     testutils::Address as _,
     token::{StellarAssetClient, TokenClient},
-    vec, Address, Bytes, Env, U256, Vec,
+    vec, Address, Bytes, Env, String, U256, Vec,
 };
 
 use crate::types::ZKApproval;
@@ -30,7 +30,7 @@ fn setup() -> Setup<'static> {
     let s2 = Address::generate(&env);
     let signers = vec![&env, owner.clone(), s1, s2];
 
-    let vault_id = client.create_vault(&owner, &signers, &2);
+    let vault_id = client.create_vault(&owner, &String::from_str(&env, "Test Vault"), &signers, &2);
 
     Setup { env, client, owner, signers, vault_id }
 }
@@ -112,10 +112,11 @@ fn test_transparent_execute_transfers_tokens() {
     let token_admin = StellarAssetClient::new(&s.env, &token_addr);
 
     let vault_addr = s.client.address.clone();
-    token_admin.mint(&vault_addr, &5_000_000);
 
-    // Transparent transferler için token adresini ayarla (pool'dan ayrı).
+    // Transparent transferler için token adresini ayarla, sonra vault'a fon yatır.
     s.client.set_token(&s.owner, &token_addr);
+    token_admin.mint(&s.owner, &5_000_000);
+    s.client.deposit(&s.vault_id, &s.owner, &5_000_000); // vault bakiyesini fonla
 
     let recipient = Address::generate(&s.env);
     let amount: i128 = 1_000_000;

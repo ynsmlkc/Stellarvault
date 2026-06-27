@@ -1,10 +1,11 @@
-use soroban_sdk::{contracttype, contracterror, contractevent, Address, Vec, U256, Bytes, BytesN};
+use soroban_sdk::{contracttype, contracterror, contractevent, Address, String, Vec, U256, Bytes, BytesN};
 
 /// Vault yapılandırması
 #[contracttype]
 #[derive(Clone)]
 pub struct VaultConfig {
     pub owner: Address,
+    pub name: String,
     pub threshold: u32,
     pub signer_count: u32,
     pub signers: Vec<Address>,
@@ -46,6 +47,7 @@ pub enum DataKey {
     NextVaultId,
     PoolAddress,
     TokenAddress,
+    VaultBalance(u64),
 }
 
 /// Vault istatistikleri

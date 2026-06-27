@@ -25,7 +25,7 @@ Rust + Soroban SDK 23 · circom 2.2 + circomlib · snarkjs Groth16 (BN254) · Ne
 
 ## Links
 - Repo: https://github.com/ynsmlkc/Stellarvault
-- Live Vault contract: https://stellar.expert/explorer/testnet/contract/CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM
+- Live Vault contract: https://stellar.expert/explorer/testnet/contract/CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7
 - Demo video: <add URL>
 
 ---

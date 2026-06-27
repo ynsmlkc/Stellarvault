@@ -25,11 +25,13 @@ const u32 = (n: number) => nativeToScVal(n, { type: "u32" });
 const i128 = (n: bigint) => nativeToScVal(n, { type: "i128" });
 const addr = (a: string) => new Address(a).toScVal();
 const bool = (b: boolean) => nativeToScVal(b);
+const str = (s: string) => nativeToScVal(s, { type: "string" });
 const addrVec = (xs: string[]) => xdr.ScVal.scvVec(xs.map((a) => new Address(a).toScVal()));
 
 /* ---------------- types ---------------- */
 export type VaultConfig = {
   owner: string;
+  name: string;
   threshold: number;
   signer_count: number;
   signers: string[];
@@ -64,13 +66,21 @@ export async function getVault(vaultId: number): Promise<VaultConfig> {
   const v = await simulate(CONFIG.vaultId, "get_vault", [u64(vaultId)]);
   return {
     owner: v.owner,
+    name: v.name,
     threshold: Number(v.threshold),
     signer_count: Number(v.signer_count),
     signers: v.signers,
   };
 }
 
-export async function getVaultBalance(): Promise<bigint> {
+/** Per-vault balance (each vault has its own, like a Safe). */
+export async function getVaultBalance(vaultId: number): Promise<bigint> {
+  const bal = await simulate(CONFIG.vaultId, "get_vault_balance", [u64(vaultId)]);
+  return BigInt(bal);
+}
+
+/** Total XLM held by the vault contract across all vaults (for the landing stat). */
+export async function getContractBalance(): Promise<bigint> {
   const bal = await simulate(CONFIG.tokenId, "balance", [addr(CONFIG.vaultId)]);
   return BigInt(bal);
 }
@@ -146,11 +156,11 @@ async function invoke(
 }
 
 /** Creates a vault and returns the new vault id (u64) from the contract. */
-export async function createVault(owner: string, signers: string[], threshold: number): Promise<number> {
+export async function createVault(owner: string, name: string, signers: string[], threshold: number): Promise<number> {
   const { returnValue } = await invoke(
     CONFIG.vaultId,
     "create_vault",
-    [addr(owner), addrVec(signers), u32(threshold)],
+    [addr(owner), str(name), addrVec(signers), u32(threshold)],
     owner
   );
   return Number(returnValue ?? 0);
@@ -210,6 +220,43 @@ export function approveZk(vaultId: number, txId: number, signer: string, proof: 
 export const execute = (vaultId: number, txId: number, executor: string) =>
   invoke(CONFIG.vaultId, "execute", [u64(vaultId), u64(txId), addr(executor)], executor);
 
-/** Transfer XLM from the connected wallet into the vault contract (deposit). */
-export const depositToVault = (from: string, amountStroops: bigint) =>
-  invoke(CONFIG.tokenId, "transfer", [addr(from), addr(CONFIG.vaultId), i128(amountStroops)], from);
+/** Deposit XLM into a specific vault's own balance. */
+export const depositToVault = (vaultId: number, from: string, amountStroops: bigint) =>
+  invoke(CONFIG.vaultId, "deposit", [u64(vaultId), addr(from), i128(amountStroops)], from);
+
+/* ---------------- shield pool (confidential transfer) ---------------- */
+const u256 = (n: bigint) => nativeToScVal(n, { type: "u256" });
+
+/** Deposit `amount` into the shield pool, registering a note `commitment`. */
+export const poolDeposit = (from: string, amountStroops: bigint, commitment: bigint) =>
+  invoke(CONFIG.shieldPoolId, "deposit", [addr(from), i128(amountStroops), u256(commitment)], from);
+
+/** Confidential withdraw: spend a note (Groth16 proof) to `recipient`. */
+export const poolWithdraw = (
+  signer: string,
+  proof: any,
+  root: bigint,
+  nullifierHash: bigint,
+  recipient: string,
+  amountStroops: bigint
+) =>
+  invoke(
+    CONFIG.shieldPoolId,
+    "withdraw",
+    [nativeToScVal(proofTo256(proof)), u256(root), u256(nullifierHash), addr(recipient), i128(amountStroops)],
+    signer
+  );
+
+/** All deposited commitments — the frontend rebuilds the Merkle tree from these. */
+export async function getCommitments(): Promise<bigint[]> {
+  const list = await simulate(CONFIG.shieldPoolId, "get_commitments", []);
+  return (list ?? []).map((x: any) => BigInt(x));
+}
+
+export async function isSpent(nullifierHash: bigint): Promise<boolean> {
+  return simulate(CONFIG.shieldPoolId, "is_spent", [u256(nullifierHash)]);
+}
+
+export async function getShieldBalance(): Promise<bigint> {
+  return BigInt(await simulate(CONFIG.tokenId, "balance", [addr(CONFIG.shieldPoolId)]));
+}

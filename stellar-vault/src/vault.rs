@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec, token::TokenClient};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, token::TokenClient};
 use crate::types::{DataKey, VaultConfig, TransactionProposal, ZKApproval, VaultStats};
 use crate::types::{VaultCreatedEvent, TransactionProposedEvent, ApprovalEvent, ZKApprovalEvent, TransactionExecutedEvent};
 
@@ -13,6 +13,7 @@ impl VaultContract {
     pub fn create_vault(
         env: Env,
         owner: Address,
+        name: String,
         signers: Vec<Address>,
         threshold: u32,
     ) -> u64 {
@@ -30,6 +31,7 @@ impl VaultContract {
 
         let config = VaultConfig {
             owner: owner.clone(),
+            name,
             threshold,
             signer_count,
             signers: signers.clone(),
@@ -59,6 +61,7 @@ impl VaultContract {
 
         let updated = VaultConfig {
             owner: config.owner,
+            name: config.name,
             signer_count: signers.len() as u32,
             signers,
             threshold: config.threshold,
@@ -87,6 +90,7 @@ impl VaultContract {
 
         let updated = VaultConfig {
             owner: config.owner,
+            name: config.name,
             signer_count: new_count,
             signers: new_signers,
             threshold: config.threshold,
@@ -335,7 +339,32 @@ impl VaultContract {
             .unwrap_or_else(|| panic!())
     }
 
+    // ==================== BAKİYE (per-vault) ====================
+
+    /// Belirli bir vault'a fon yatır — bakiye o vault'a yazılır
+    pub fn deposit(env: Env, vault_id: u64, from: Address, amount: i128) {
+        from.require_auth();
+        if amount <= 0 {
+            panic!();
+        }
+        let _config = Self::get_config(&env, vault_id); // vault var mı doğrula
+        let token_addr = Self::get_token_address(env.clone());
+        TokenClient::new(&env, &token_addr).transfer(&from, &env.current_contract_address(), &amount);
+
+        let new_bal = Self::vault_balance(&env, vault_id) + amount;
+        env.storage().persistent().set(&DataKey::VaultBalance(vault_id), &new_bal);
+    }
+
+    /// Bir vault'un kendi bakiyesi (paylaşılan değil, vault'a özel)
+    pub fn get_vault_balance(env: Env, vault_id: u64) -> i128 {
+        Self::vault_balance(&env, vault_id)
+    }
+
     // ==================== YARDIMCI ====================
+
+    fn vault_balance(env: &Env, vault_id: u64) -> i128 {
+        env.storage().persistent().get(&DataKey::VaultBalance(vault_id)).unwrap_or(0)
+    }
 
     fn get_config(env: &Env, vault_id: u64) -> VaultConfig {
         env.storage()
@@ -375,8 +404,14 @@ impl VaultContract {
         false
     }
 
-    /// Transparent execution — normal token transfer
-    fn execute_transparent(env: &Env, _vault_id: u64, _tx_id: u64, proposal: &TransactionProposal) {
+    /// Transparent execution — vault'un kendi bakiyesinden token transferi
+    fn execute_transparent(env: &Env, vault_id: u64, _tx_id: u64, proposal: &TransactionProposal) {
+        let bal = Self::vault_balance(env, vault_id);
+        if bal < proposal.amount {
+            panic!(); // yetersiz vault bakiyesi
+        }
+        env.storage().persistent().set(&DataKey::VaultBalance(vault_id), &(bal - proposal.amount));
+
         let token_addr = Self::get_token_address(env.clone());
         let client = TokenClient::new(env, &token_addr);
         client.transfer(&env.current_contract_address(), &proposal.target, &proposal.amount);

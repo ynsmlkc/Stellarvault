@@ -24,6 +24,7 @@ import {
   type Proposal,
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, H } from "@/lib/prover";
+import Shield from "./shield";
 
 /* ============================ tokens ============================ */
 const DISPLAY = "'Newsreader',serif";
@@ -37,7 +38,25 @@ const GRADS = [GRAD_A, GRAD_B, GRAD_C];
 
 const ACTIVE_VAULT = 0; // live demo runs against the deployed vault #0
 
-type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose";
+// per-wallet list of vaults the user created (so they persist across reloads)
+const myVaultsKey = (w: string) => `sv_vaults_${CONFIG.vaultId.slice(0, 8)}_${w}`;
+function loadMyVaults(w: string | null): number[] {
+  if (!w || typeof localStorage === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(myVaultsKey(w)) || "[]");
+  } catch {
+    return [];
+  }
+}
+function saveMyVault(w: string, id: number) {
+  const ids = loadMyVaults(w);
+  if (!ids.includes(id)) {
+    ids.push(id);
+    localStorage.setItem(myVaultsKey(w), JSON.stringify(ids));
+  }
+}
+
+type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield";
 type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
@@ -104,7 +123,7 @@ export default function Page() {
     try {
       const [c, b, p] = await Promise.all([
         getVault(id),
-        getVaultBalance(),
+        getVaultBalance(id),
         getProposals(id),
       ]);
       setConfig(c);
@@ -127,6 +146,14 @@ export default function Page() {
     setScreen(s);
     window.scrollTo(0, 0);
     if (s === "vault" || s === "dashboard") loadData();
+  };
+
+  // open a specific vault id (from the dashboard list) without stale reloads
+  const selectVault = (id: number) => {
+    setVaultId(id);
+    setScreen("vault");
+    window.scrollTo(0, 0);
+    loadData(id);
   };
 
   const showToast = (t: ToastMsg) => {
@@ -171,12 +198,13 @@ export default function Page() {
   };
 
   // Create a real vault owned by the connected wallet, then switch to it.
-  const doCreate = async (signers: string[], threshold: number) => {
+  const doCreate = async (name: string, signers: string[], threshold: number) => {
     const w = requireWallet();
     if (!w) return;
     setBusy("create");
     try {
-      const newId = await createVaultTx(w, signers, threshold);
+      const newId = await createVaultTx(w, name, signers, threshold);
+      saveMyVault(w, newId);
       setVaultId(newId);
       await loadData(newId);
       go("vault");
@@ -307,7 +335,7 @@ export default function Page() {
     if (!w) return;
     setBusy("deposit");
     try {
-      await depositToVault(w, parseAmountToStroops("100"));
+      await depositToVault(vaultId, w, parseAmountToStroops("100"));
       await loadData();
       showToast({ title: "Deposited 100 XLM", sub: "Vault balance updated.", tone: "ok" });
     } catch (e: any) {
@@ -317,7 +345,7 @@ export default function Page() {
     }
   };
 
-  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose";
+  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield";
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
@@ -326,7 +354,7 @@ export default function Page() {
       {isApp && (
         <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} wallet={wallet}
           vaultId={vaultId} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onDeposit={doDeposit} />
+          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onDeposit={doDeposit} onOpenVault={selectVault} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -492,7 +520,7 @@ type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
   submitPropose: (target: string, amount: string) => void; wallet: string | null; vaultId: number;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  onCreate: (signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void;
+  onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onOpenVault: (id: number) => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -508,7 +536,7 @@ function AppShell(p: ShellProps) {
           </div>
           <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
-            {navBtn("Activity", false)}
+            {navBtn("🔒 Confidential", p.screen === "shield", () => p.go("shield"))}
             {navBtn("Settings", false)}
           </div>
         </div>
@@ -525,18 +553,57 @@ function AppShell(p: ShellProps) {
       </div>
 
       <div style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
-        {p.screen === "dashboard" && <Dashboard go={p.go} config={p.config} balance={p.balance} proposals={p.proposals} vaultId={p.vaultId} />}
+        {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultId={p.vaultId} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail go={p.go} vaultId={p.vaultId} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onDeposit={p.onDeposit} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} busy={p.busy} balance={p.balance} />}
+        {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
     </div>
   );
 }
 
 /* ============================ DASHBOARD ============================ */
-function Dashboard({ go, config, balance, proposals, vaultId }: { go: (s: Screen) => void; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; vaultId: number }) {
+function Dashboard({ go, wallet, balance, proposals, vaultId, onOpenVault }: { go: (s: Screen) => void; wallet: string | null; balance: bigint | null; proposals: Proposal[]; vaultId: number; onOpenVault: (id: number) => void }) {
   const pending = proposals.filter((x) => !x.executed).length;
+  const [myVaults, setMyVaults] = useState<{ id: number; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
+  const [demo, setDemo] = useState<{ name: string; threshold: number; signers: number; balance: bigint } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [c, b] = await Promise.all([getVault(0), getVaultBalance(0)]);
+        if (alive) setDemo({ name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b });
+      } catch {}
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const ids = loadMyVaults(wallet);
+    if (!ids.length) {
+      setMyVaults([]);
+      return;
+    }
+    let alive = true;
+    Promise.all(
+      ids.map(async (id) => {
+        try {
+          const [c, b] = await Promise.all([getVault(id), getVaultBalance(id)]);
+          return { id, name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b };
+        } catch {
+          return null;
+        }
+      })
+    ).then((r) => alive && setMyVaults(r.filter(Boolean) as any));
+    return () => {
+      alive = false;
+    };
+  }, [wallet]);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30 }}>
@@ -547,14 +614,28 @@ function Dashboard({ go, config, balance, proposals, vaultId }: { go: (s: Screen
         <button onClick={() => go("create")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "12px 18px", border: "none", borderRadius: 9, cursor: "pointer" }}><span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Create New Vault</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
-        <Stat label="Vault balance (live)" valueNode={<>{balance != null ? formatXLM(balance) : "—"} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
-        <Stat label="Signers" valueNode={<>{config?.signer_count ?? "—"}</>} />
-        <Stat label="Pending transactions" valueNode={<span style={{ color: "#C9A86A" }}>{pending}</span>} gold />
+        <Stat label="Current vault balance" valueNode={<>{balance != null ? formatXLM(balance) : "—"} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
+        <Stat label="Your vaults" valueNode={<>{myVaults.length}</>} />
+        <Stat label="Pending (current vault)" valueNode={<span style={{ color: "#C9A86A" }}>{pending}</span>} gold />
       </div>
+
+      {wallet && (
+        <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>YOUR VAULTS</div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
+        {myVaults.map((v) => (
+          <VaultCard key={v.id} onClick={() => onOpenVault(v.id)} name={v.name || `Vault #${v.id}`} id={`#${v.id} · ${shortContract(CONFIG.vaultId)}`} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.id === vaultId} live />
+        ))}
+        {!myVaults.length && wallet && (
+          <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
+            No vaults yet. Click <span style={{ color: "#C9A86A" }}>“Create New Vault”</span> — it’ll appear here and stay across reloads.
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>DEMO VAULT (read-only)</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18 }}>
-        <VaultCard onClick={() => go("vault")} name={vaultId === 0 ? "Orbital Treasury" : `Vault #${vaultId}`} id={shortContract(CONFIG.vaultId)} threshold={config ? `${config.threshold} / ${config.signer_count}` : "2 / 3"} balance={balance != null ? formatXLM(balance) : "48,200"} avatars={(config?.signers ?? ["A", "B", "C"]).map((_, i) => letterFor(i))} pending={pending ? `${pending} pending` : undefined} gold live />
-        <VaultCard name="Helios DAO Reserve" id="CHEL…9PQR" threshold="3 / 5" balance="1,204,000" avatars={["M", "K", "+3"]} />
-        <VaultCard name="Nightshade Ops" id="CNGT…4LMX" threshold="3 / 4" balance="92,500" avatars={["D", "E", "+2"]} pending="4 pending" />
+        <VaultCard onClick={() => onOpenVault(0)} name={demo?.name || "Orbital Treasury"} id={`#0 · ${shortContract(CONFIG.vaultId)}`} threshold={demo ? `${demo.threshold} / ${demo.signers}` : "2 / 3"} balance={demo ? formatXLM(demo.balance) : "—"} avatars={Array.from({ length: demo?.signers ?? 3 }, (_, i) => letterFor(i))} gold={vaultId === 0} />
       </div>
     </div>
   );
@@ -596,7 +677,8 @@ function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live,
 }
 
 /* ============================ CREATE VAULT (live) ============================ */
-function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; wallet: string | null; busy: string | null; onCreate: (signers: string[], threshold: number) => void }) {
+function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; wallet: string | null; busy: string | null; onCreate: (name: string, signers: string[], threshold: number) => void }) {
+  const [name, setName] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(1);
   const inputStyle: React.CSSProperties = { flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 };
@@ -604,7 +686,7 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
   const allSigners = [wallet ?? "", ...extra].filter((s) => s.trim().length > 0);
   const validAddr = (a: string) => /^G[A-Z2-7]{55}$/.test(a.trim());
   const signerCount = allSigners.length;
-  const canCreate = !!wallet && allSigners.every(validAddr) && threshold >= 1 && threshold <= signerCount && busy !== "create";
+  const canCreate = !!wallet && name.trim().length > 0 && allSigners.every(validAddr) && threshold >= 1 && threshold <= signerCount && busy !== "create";
 
   const setExtraAt = (i: number, v: string) => setExtra((xs) => xs.map((x, j) => (j === i ? v : x)));
   const removeExtra = (i: number) => setExtra((xs) => xs.filter((_, j) => j !== i));
@@ -614,6 +696,11 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
       <button onClick={() => go("dashboard")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 22, padding: 0 }}>← Back to vaults</button>
       <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Create a vault</h1>
       <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 34 }}>Define who holds the keys and how many must agree before funds move.</p>
+
+      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 28, marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Vault name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Orbital Treasury" maxLength={40} style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "12px 14px", color: "#ECE7DD", fontFamily: SANS, fontSize: 14 }} />
+      </div>
 
       <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 28, marginBottom: 18 }}>
         <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 14 }}>Signers</label>
@@ -652,7 +739,7 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
         <span style={{ fontSize: 15, color: "#ECE7DD" }}><span style={{ color: "#C9A86A", fontWeight: 600 }}>{threshold} of {signerCount}</span> signer{signerCount === 1 ? "" : "s"} must approve to move funds.</span>
       </div>
 
-      <button onClick={() => canCreate && onCreate(allSigners, threshold)} disabled={!canCreate} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: canCreate ? "pointer" : "not-allowed", opacity: canCreate ? 1 : 0.5 }}>{busy === "create" ? "Creating · check Freighter…" : "Create vault · sign with wallet"}</button>
+      <button onClick={() => canCreate && onCreate(name.trim(), allSigners, threshold)} disabled={!canCreate} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: canCreate ? "pointer" : "not-allowed", opacity: canCreate ? 1 : 0.5 }}>{busy === "create" ? "Creating · check Freighter…" : "Create vault · sign with wallet"}</button>
       <p style={{ fontSize: 11, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO }}>{wallet ? "Threshold 1 + just you = full solo demo (propose → approve → execute yourself)" : "Connect a Freighter wallet to create on-chain"}</p>
     </div>
   );
@@ -679,7 +766,7 @@ function VaultDetail({ go, vaultId, config, balance, proposals, loading, busy, w
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-              <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{vaultId === 0 ? "Orbital Treasury" : `Vault #${vaultId}`}</h1>
+              <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || `Vault #${vaultId}`}</h1>
               <span style={{ fontFamily: MONO, fontSize: 11, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.32)", borderRadius: 6, padding: "4px 9px" }}>{threshold} / {config?.signer_count ?? signers.length} threshold</span>
               <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "2px 6px" }}>LIVE · TESTNET</span>
             </div>

@@ -4,6 +4,7 @@ export const CONFIG = {
   vaultId: process.env.NEXT_PUBLIC_VAULT_CONTRACT_ID ?? "",
   tokenId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
   poolId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",
+  shieldPoolId: process.env.NEXT_PUBLIC_SHIELD_POOL_ID ?? "",
   verifierId: process.env.NEXT_PUBLIC_VERIFIER_CONTRACT_ID ?? "",
   network: process.env.NEXT_PUBLIC_NETWORK ?? "testnet",
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",

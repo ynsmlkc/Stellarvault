@@ -3,7 +3,7 @@
 > **The first multi-signature treasury on Stellar where each transaction can be transparent _or_ private.**
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
-[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM)
+[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7)
 [![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2023-C9A86A)](stellar-vault/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
 
@@ -39,10 +39,11 @@ Same vault, same threshold — **you decide what the chain is allowed to see.**
 | **Transparent flow** | ✅ **Fully working** | propose → approve → execute moves **real XLM** on testnet, wallet-signed |
 | **ZK voter privacy** | ✅ **Real ZK** | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), real Groth16 proofs generated **in-browser**, `approve_zk` records the nullifier on-chain — identity hidden in the event, double-vote prevented |
 | **dApp frontend** | ✅ **Working** | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI |
-| **Confidential execution** | 🚧 **Roadmap (next layer)** | hides amount + recipient via a UTXO Pool (Nethermind). Verifier + Pool + ASPs already deployed; `execute_confidential` is the integration point |
-| **On-chain Groth16 verify** | 🚧 **Roadmap** | proofs are real & browser-verified today; an on-chain verifier keyed to our circuit is the production hardening step (BN254 host fns are still draft on testnet — CAP-0074) |
+| **Per-vault balances + naming** | ✅ **Live** | each vault has its own name + segregated balance (`deposit` / `get_vault_balance`); production roadmap = Safe-style factory (one contract per vault) |
+| **Confidential transfers (shielded pool)** | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed |
+| **On-chain Groth16 verify** | 🚧 **Roadmap** | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step (BN254 host fns are still draft on testnet — CAP-0074) |
 
-> **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow** and **real zero-knowledge voter privacy**. Confidential _execution_ is the documented next layer.
+> **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
 
 ---
 
@@ -84,12 +85,12 @@ Same vault, same threshold — **you decide what the chain is allowed to see.**
 
 | Contract | ID |
 |---|---|
-| **Vault** | `CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM` |
+| **Vault** | `CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7` |
+| **Shield Pool** (our confidential layer) | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
 | Token (XLM SAC) | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
-| Pool (Nethermind) | `CCQRXA6UMVSPKRZDYGVS2G3E67INXML7EX5NZVFGC66E3FLJEGA5VTHY` |
-| Groth16 Verifier | `CDRMXX3O74B7S6UV47A6JRSUUUGQ6OYWG2NYDHJKZY4PTULZN7GAKL6V` |
+| Nethermind Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…` |
 
-🔭 [View the Vault on stellar.expert](https://stellar.expert/explorer/testnet/contract/CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM)
+🔭 [View the Vault on stellar.expert](https://stellar.expert/explorer/testnet/contract/CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7)
 
 ---
 
