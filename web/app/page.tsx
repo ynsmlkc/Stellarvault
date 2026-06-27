@@ -373,14 +373,15 @@ function cleanErr(e: any): string {
 
 /* ============================ LANDING ============================ */
 function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVault: () => void; balance: bigint | null }) {
+  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <div style={{ position: "relative", minHeight: "100vh", overflow: "hidden" }}>
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
         <div style={{ position: "absolute", top: "-12%", right: "-8%", width: 780, height: 780, borderRadius: "50%", background: "radial-gradient(circle at center, rgba(201,168,106,0.22), rgba(201,168,106,0.05) 40%, transparent 66%)", filter: "blur(8px)", animation: "vsGlow 9s ease-in-out infinite" }} />
         <div style={{ position: "absolute", bottom: "-30%", left: "-12%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle at center, rgba(201,168,106,0.10), transparent 64%)", filter: "blur(10px)" }} />
         <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(236,231,221,0.035) 1px,transparent 1px),linear-gradient(90deg,rgba(236,231,221,0.035) 1px,transparent 1px)", backgroundSize: "64px 64px", maskImage: "radial-gradient(ellipse 90% 80% at 60% 30%, #000 30%, transparent 80%)", WebkitMaskImage: "radial-gradient(ellipse 90% 80% at 60% 30%, #000 30%, transparent 80%)" }} />
       </div>
-      <div style={{ position: "absolute", top: "50%", right: -180, transform: "translateY(-50%)", width: 760, height: 760, pointerEvents: "none", opacity: 0.9 }}>
+      <div style={{ position: "fixed", top: "50%", right: -180, transform: "translateY(-50%)", width: 760, height: 760, pointerEvents: "none", opacity: 0.9, zIndex: 0 }}>
         <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.16)", animation: "vsSpin 80s linear infinite" }} />
         <div style={{ position: "absolute", inset: 70, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.12)" }} />
         <div style={{ position: "absolute", inset: 140, borderRadius: "50%", border: "1px dashed rgba(201,168,106,0.18)", animation: "vsSpinR 60s linear infinite" }} />
@@ -400,9 +401,9 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
           <div style={{ display: "flex", gap: 30, fontSize: 14, color: "#8A857B" }}>
-            <span className="h-navtext" style={{ cursor: "pointer" }}>Product</span>
-            <span className="h-navtext" style={{ cursor: "pointer" }}>Privacy</span>
-            <span className="h-navtext" style={{ cursor: "pointer" }}>Docs</span>
+            <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("product")}>Product</span>
+            <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("privacy")}>Privacy</span>
+            <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("docs")}>Docs</span>
           </div>
           <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "11px 18px", border: "none", borderRadius: 8, cursor: "pointer", boxShadow: "0 6px 24px rgba(201,168,106,0.22)" }}>Get Started <span style={{ fontSize: 15 }}>↗</span></button>
         </div>
@@ -422,7 +423,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           </p>
           <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 16, padding: "15px 28px", border: "none", borderRadius: 9, cursor: "pointer", boxShadow: "0 8px 30px rgba(201,168,106,0.26)" }}>Get Started <span>↗</span></button>
-            <button onClick={onVault} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>Create your treasury →</button>
+            <button onClick={() => scrollTo("product")} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>See how it works ↓</button>
           </div>
           <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: 12, color: "#5a564d" }}>
             <div><span style={{ color: "#8A857B" }}>CONTRACT</span> &nbsp;{shortContract(CONFIG.factoryId)}</div>
@@ -434,7 +435,40 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 110px" }}>
+      <div id="product" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 30px", scrollMarginTop: 24 }}>
+        <div style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, marginBottom: 36 }}>
+          <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>HOW IT WORKS</div>
+          <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD", maxWidth: 620 }}>From zero to a confidential treasury in three steps.</h2>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 22, marginBottom: 26 }}>
+          {[
+            { n: "01", t: "Create a vault", d: "A factory deploys a fresh smart contract — its own address & balance, your chosen signers and m-of-n threshold. Safe-style, one contract per vault." },
+            { n: "02", t: "Propose & approve", d: "Anyone proposes a transfer. Co-signers approve — transparently (name on-chain) or privately, where a zero-knowledge proof proves a valid signer approved without revealing who." },
+            { n: "03", t: "Execute", d: "Once the threshold is met, any signer executes. Real XLM moves from the vault — and in private mode the chain never learns who approved." },
+          ].map((s) => (
+            <div key={s.n} className="h-card" style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#101010", padding: 26 }}>
+              <div style={{ fontFamily: MONO, fontSize: 12, color: "#C9A86A", marginBottom: 16 }}>{s.n}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD", marginBottom: 10 }}>{s.t}</div>
+              <div style={{ fontSize: 13.5, color: "#8A857B", lineHeight: 1.6 }}>{s.d}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
+          {[
+            ["Safe-style factory", "One contract per vault"],
+            ["Per-transaction privacy", "Transparent or private, your call"],
+            ["ZK voter privacy", "Hide who approved (Groth16)"],
+            ["Shielded pool", "Hide amount + recipient"],
+          ].map(([t, d]) => (
+            <div key={t} style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: "16px 18px" }}>
+              <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 4 }}>{t}</div>
+              <div style={{ fontSize: 12, color: "#8A857B", lineHeight: 1.5 }}>{d}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div id="privacy" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 110px", scrollMarginTop: 24 }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30, borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40 }}>
           <div>
             <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>THE SAME LEDGER, TWO STATES</div>
@@ -478,6 +512,40 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
+      <div id="docs" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "20px 48px 100px", scrollMarginTop: 24 }}>
+        <div style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48 }}>
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>UNDER THE HOOD</div>
+            <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+              {[
+                ["Smart-contract vault", "Soroban (Rust, SDK 23) — not native multi-sig, so it can run custom logic native accounts can't."],
+                ["Our own ZK circuits", "voteApproval (Poseidon + Merkle membership + nullifier) & confidentialTransfer, compiled with circom."],
+                ["Groth16 in the browser", "Proofs are generated client-side with snarkjs; the chain records only a nullifier — never who approved."],
+                ["Factory architecture", "One deployed contract per vault, with an on-chain owner→vaults registry."],
+              ].map(([t, d]) => (
+                <div key={t} style={{ display: "flex", gap: 12 }}>
+                  <span style={{ color: "#C9A86A", marginTop: 2 }}>▹</span>
+                  <div><span style={{ color: "#ECE7DD", fontWeight: 600, fontSize: 14 }}>{t}</span> <span style={{ color: "#8A857B", fontSize: 13.5, lineHeight: 1.55 }}>— {d}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <a href="https://github.com/ynsmlkc/Stellarvault" target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: "16px 18px", color: "#ECE7DD" }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Source on GitHub</span><span style={{ color: "#8A857B" }}>↗</span>
+            </a>
+            <a href={contractExplorerUrl(CONFIG.factoryId)} target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: "16px 18px", color: "#ECE7DD" }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Factory on stellar.expert</span><span style={{ color: "#8A857B" }}>↗</span>
+            </a>
+            <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: 18, marginTop: 4 }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#5a564d", marginBottom: 10 }}>STACK</div>
+              <div style={{ fontFamily: MONO, fontSize: 12, color: "#8A857B", lineHeight: 1.9 }}>Soroban SDK 23 · circom + circomlib<br />snarkjs Groth16 (BN254)<br />Next.js 14 · Freighter · Protocol 23</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ position: "relative", zIndex: 4, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "30px 48px" }}>
         <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13, color: "#5a564d" }}>
           <span style={{ letterSpacing: ".14em" }}>STELLAR&nbsp;VAULT</span>
@@ -508,7 +576,6 @@ function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConn
           <span style={{ width: 20, height: 20, borderRadius: 5, background: "#0A0A0B", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#C9A86A", fontSize: 12, fontWeight: 700 }}>F</span>
           {connecting ? "Connecting…" : "Connect Freighter"}
         </button>
-        <button className="h-kit" style={{ width: "100%", marginTop: 12, background: "transparent", color: "#8A857B", fontFamily: SANS, fontWeight: 500, fontSize: 14, padding: 13, border: "1px solid rgba(236,231,221,0.12)", borderRadius: 10, cursor: "pointer" }}>Stellar Wallets Kit</button>
         <div style={{ marginTop: 24, fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>TESTNET · no real funds at risk</div>
       </div>
     </div>
