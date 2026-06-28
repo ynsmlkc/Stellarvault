@@ -394,13 +394,13 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div style={{ position: "relative", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "26px 48px", maxWidth: 1340, margin: "0 auto" }}>
+      <div className="vsec" style={{ position: "relative", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "26px 48px", maxWidth: 1340, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <LogoMark />
           <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: 14, color: "#ECE7DD" }}>STELLAR&nbsp;VAULT</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
-          <div style={{ display: "flex", gap: 30, fontSize: 14, color: "#8A857B" }}>
+          <div className="vnav-links" style={{ display: "flex", gap: 30, fontSize: 14, color: "#8A857B" }}>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("product")}>Product</span>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("privacy")}>Privacy</span>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("docs")}>Docs</span>
@@ -409,23 +409,23 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "96px 48px 60px" }}>
+      <div className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "96px 48px 60px" }}>
         <div style={{ maxWidth: 820 }}>
           <div className="vs-rise" style={{ display: "inline-flex", alignItems: "center", gap: 10, border: "1px solid rgba(201,168,106,0.28)", borderRadius: 100, padding: "7px 14px", fontFamily: MONO, fontSize: 11, letterSpacing: ".18em", color: "#C9A86A", marginBottom: 34 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069", animation: "vsPulseDot 2s ease-in-out infinite" }} />
             STELLAR · SOROBAN · ZERO-KNOWLEDGE
           </div>
-          <h1 className="vs-rise" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 84, lineHeight: 1.02, letterSpacing: "-0.02em", color: "#ECE7DD", marginBottom: 30 }}>
+          <h1 className="vs-rise vh1" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 84, lineHeight: 1.02, letterSpacing: "-0.02em", color: "#ECE7DD", marginBottom: 30 }}>
             The first <span style={{ fontStyle: "italic", color: "#C9A86A" }}>confidential</span> multi-sig treasury on Stellar.
           </h1>
           <p className="vs-rise" style={{ fontSize: 19, lineHeight: 1.6, color: "#8A857B", maxWidth: 560, marginBottom: 42 }}>
             Approve as a team. Reveal nothing. Every transaction runs <span style={{ color: "#ECE7DD" }}>transparent</span> for the world to audit — or <span style={{ color: "#ECE7DD" }}>private</span>, where signer identities, amounts and recipients stay sealed behind zero-knowledge proofs.
           </p>
-          <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="vs-rise vrow-wrap" style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 16, padding: "15px 28px", border: "none", borderRadius: 9, cursor: "pointer", boxShadow: "0 8px 30px rgba(201,168,106,0.26)" }}>Get Started <span>↗</span></button>
             <button onClick={() => scrollTo("product")} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>See how it works ↓</button>
           </div>
-          <div className="vs-rise" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: 12, color: "#5a564d" }}>
+          <div className="vs-rise vstats" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: 12, color: "#5a564d" }}>
             <div><span style={{ color: "#8A857B" }}>CONTRACT</span> &nbsp;{shortContract(CONFIG.factoryId)}</div>
             <div style={{ width: 1, height: 14, background: "rgba(236,231,221,0.12)" }} />
             <div><span style={{ color: "#8A857B" }}>NETWORK</span> &nbsp;Testnet · live</div>
@@ -435,12 +435,12 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div id="product" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 30px", scrollMarginTop: 24 }}>
+      <div id="product" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 30px", scrollMarginTop: 24 }}>
         <div style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, marginBottom: 36 }}>
           <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>HOW IT WORKS</div>
-          <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD", maxWidth: 620 }}>From zero to a confidential treasury in three steps.</h2>
+          <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD", maxWidth: 620 }}>From zero to a confidential treasury in three steps.</h2>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 22, marginBottom: 26 }}>
+        <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 22, marginBottom: 26 }}>
           {[
             { n: "01", t: "Create a vault", d: "A factory deploys a fresh smart contract — its own address & balance, your chosen signers and m-of-n threshold. Safe-style, one contract per vault." },
             { n: "02", t: "Propose & approve", d: "Anyone proposes a transfer. Co-signers approve — transparently (name on-chain) or privately, where a zero-knowledge proof proves a valid signer approved without revealing who." },
@@ -453,7 +453,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
             </div>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
+        <div className="vgrid4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
           {[
             ["Safe-style factory", "One contract per vault"],
             ["Per-transaction privacy", "Transparent or private, your call"],
@@ -468,15 +468,15 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div id="privacy" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 110px", scrollMarginTop: 24 }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30, borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40 }}>
+      <div id="privacy" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 110px", scrollMarginTop: 24 }}>
+        <div className="vwrap-head" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30, borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40 }}>
           <div>
             <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>THE SAME LEDGER, TWO STATES</div>
-            <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD" }}>Same security. Different privacy.</h2>
+            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD" }}>Same security. Different privacy.</h2>
           </div>
           <p style={{ maxWidth: 300, fontSize: 14, color: "#8A857B", textAlign: "right" }}>One vault, one threshold. You decide — per transaction — what the chain is allowed to see.</p>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        <div className="vgrid2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
           <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 16, background: "linear-gradient(180deg,#16150f,#121210)", padding: 30, overflow: "hidden" }}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
@@ -512,11 +512,11 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div id="docs" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "20px 48px 100px", scrollMarginTop: 24 }}>
-        <div style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48 }}>
+      <div id="docs" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "20px 48px 100px", scrollMarginTop: 24 }}>
+        <div className="vgridD" style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48 }}>
           <div>
             <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>UNDER THE HOOD</div>
-            <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
+            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
               {[
                 ["Smart-contract vault", "Soroban (Rust, SDK 23) — not native multi-sig, so it can run custom logic native accounts can't."],
@@ -546,7 +546,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         </div>
       </div>
 
-      <div style={{ position: "relative", zIndex: 4, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "30px 48px" }}>
+      <div className="vsec" style={{ position: "relative", zIndex: 4, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "30px 48px" }}>
         <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13, color: "#5a564d" }}>
           <span style={{ letterSpacing: ".14em" }}>STELLAR&nbsp;VAULT</span>
           <span style={{ fontFamily: MONO }}>© 2026 · Built on Soroban testnet</span>
@@ -559,13 +559,13 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
 /* ============================ CONNECT ============================ */
 function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConnect: () => void; connecting: boolean }) {
   return (
-    <div style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+    <div style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", padding: "24px 20px" }}>
       <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 640, height: 640, borderRadius: "50%", background: "radial-gradient(circle,rgba(201,168,106,0.14),transparent 65%)", filter: "blur(10px)", animation: "vsGlow 8s ease-in-out infinite", pointerEvents: "none" }} />
       <div style={{ position: "absolute", top: 26, left: 48, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={onBack}>
         <LogoMark size={30} />
         <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: 14 }}>STELLAR&nbsp;VAULT</span>
       </div>
-      <div className="vs-rise" style={{ position: "relative", zIndex: 2, width: 440, border: "1px solid rgba(236,231,221,0.10)", borderRadius: 18, background: "linear-gradient(180deg,#141413,#0f0f10)", padding: 40, textAlign: "center", boxShadow: "0 30px 80px rgba(0,0,0,0.5)" }}>
+      <div className="vs-rise vfixed" style={{ position: "relative", zIndex: 2, width: 440, border: "1px solid rgba(236,231,221,0.10)", borderRadius: 18, background: "linear-gradient(180deg,#141413,#0f0f10)", padding: 40, textAlign: "center", boxShadow: "0 30px 80px rgba(0,0,0,0.5)" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.4)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 26px", position: "relative" }}>
           <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px dashed rgba(201,168,106,0.25)", animation: "vsSpin 24s linear infinite" }} />
           <div style={{ width: 18, height: 18, borderRadius: 4, background: "#C9A86A", boxShadow: "0 0 20px rgba(201,168,106,0.6)" }} />
@@ -619,7 +619,7 @@ function AppShell(p: ShellProps) {
         </div>
       </div>
 
-      <div style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
+      <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
@@ -676,7 +676,7 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
         </div>
         <button onClick={() => go("create")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "12px 18px", border: "none", borderRadius: 9, cursor: "pointer" }}><span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Create New Vault</button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
+      <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
         <Stat label="Total balance" valueNode={<>{loadingVaults ? "…" : formatXLM(myVaults.reduce((s, v) => s + v.balance, 0n))} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
         <Stat label="Your vaults" valueNode={<>{loadingVaults ? "…" : myVaults.length}</>} />
         <Stat label="Pending (current vault)" valueNode={<span style={{ color: "#C9A86A" }}>{pending}</span>} gold />
@@ -685,7 +685,7 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
       {wallet && (
         <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>YOUR VAULTS</div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
+      <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
         {loadingVaults && wallet && [0, 1, 2].map((i) => <VaultCardSkeleton key={i} />)}
         {!loadingVaults && myVaults.map((v) => (
           <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live />

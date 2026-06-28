@@ -57,3 +57,24 @@ input:focus { outline: none; }
 .h-kit { transition: border-color .18s, color .18s; }
 .h-kit:hover { border-color: rgba(236,231,221,0.24) !important; color: #ECE7DD !important; }
 .h-history:hover { color: #ECE7DD !important; }
+
+/* ---------------- responsive (mobile / small tablet) ---------------- */
+@media (max-width: 820px) {
+  .vsec { padding-left: 20px !important; padding-right: 20px !important; }
+  .vgrid2, .vgrid3, .vgrid4, .vgridD { grid-template-columns: 1fr !important; }
+  .vh1 { font-size: 44px !important; line-height: 1.06 !important; }
+  .vh2 { font-size: 28px !important; }
+  .vnav-links { display: none !important; }
+  .vstats { flex-wrap: wrap !important; gap: 12px 18px !important; row-gap: 10px !important; }
+  .vstats > div[style*="width:1px"], .vstats > div:nth-child(even) { }
+  .vfixed { width: 100% !important; max-width: 100% !important; }
+  .vrow-wrap { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+  .vrow-wrap > button, .vrow-wrap > a { width: 100% !important; justify-content: center !important; }
+  .vwrap-head { flex-direction: column !important; align-items: flex-start !important; gap: 14px !important; }
+  .vwrap-head p { text-align: left !important; max-width: 100% !important; }
+  .vhide-sm { display: none !important; }
+}
+@media (max-width: 480px) {
+  .vh1 { font-size: 36px !important; }
+  .vsec { padding-left: 16px !important; padding-right: 16px !important; }
+}

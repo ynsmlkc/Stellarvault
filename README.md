@@ -1,6 +1,8 @@
 # 🔐 Stellar Vault — Confidential Multi-Sig Treasury
 
-> **The first multi-signature treasury on Stellar where each transaction can be transparent _or_ private.**
+**▶ [Watch the demo](https://youtu.be/eVrGjdqSn-4)**
+
+> **The first _confidential_ multi-signature treasury on Stellar — each transaction can be transparent _or_ private.**
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
 [![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
@@ -22,14 +24,14 @@ There is no **confidential** multi-sig on Stellar, and no programmable one. That
 
 A Soroban **smart-contract** multi-sig where the initiator picks the privacy level **per transaction** — plus a shielded pool for fully confidential transfers:
 
-| | **Transparent** | **Private (ZK)** |
-|---|---|---|
-| Who proposed | ✅ Visible | ✅ Visible |
-| **Who approved** | ✅ Visible (Alice, Bob…) | 🔒 **Hidden** — a ZK proof: "a valid signer approved", chain records only a nullifier |
-| Amount / Recipient | ✅ Public | Visible to co-signers (they approve it), public on-chain |
-| Feel | A public bank statement | An anonymously-signed payment |
+|                    | **Transparent**          | **Private (ZK)**                                                                      |
+| ------------------ | ------------------------ | ------------------------------------------------------------------------------------- |
+| Who proposed       | ✅ Visible               | ✅ Visible                                                                            |
+| **Who approved**   | ✅ Visible (Alice, Bob…) | 🔒 **Hidden** — a ZK proof: "a valid signer approved", chain records only a nullifier |
+| Amount / Recipient | ✅ Public                | Visible to co-signers (they approve it), public on-chain                              |
+| Feel               | A public bank statement  | An anonymously-signed payment                                                         |
 
-**Voter privacy** (above) hides *who approved*. For a transfer where the **amount + recipient** are hidden from everyone — and the deposit↔recipient link is severed — there's a separate **shielded pool** (our own `confidentialTransfer` circuit).
+**Voter privacy** (above) hides _who approved_. For a transfer where the **amount + recipient** are hidden from everyone — and the deposit↔recipient link is severed — there's a separate **shielded pool** (our own `confidentialTransfer` circuit).
 
 Same vault, same threshold — **you decide what the chain is allowed to see.**
 
@@ -51,15 +53,15 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 
 ## What's built (honest status)
 
-| Layer | Status | Detail |
-|---|---|---|
-| **Soroban multi-sig vault** | ✅ **Live on testnet** | create vault, signer mgmt, threshold, propose, approve, execute, cancel — 7/7 contract tests pass |
-| **Transparent flow** | ✅ **Fully working** | propose → approve → execute moves **real XLM** on testnet, wallet-signed |
-| **ZK voter privacy** | ✅ **Real ZK** | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), real Groth16 proofs generated **in-browser**, `approve_zk` records the nullifier on-chain — identity hidden in the event, double-vote prevented |
-| **dApp frontend** | ✅ **Working** | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI |
-| **Safe-style factory — one contract per vault** | ✅ **Live** | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture |
-| **Confidential transfers (shielded pool)** | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed |
-| **On-chain Groth16 verify** | 🚧 **Roadmap** | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step — now unblocked by the Jan-2026 "X-Ray" upgrade (BN254 + Poseidon host functions on Soroban) |
+| Layer                                           | Status                   | Detail                                                                                                                                                                                                                |
+| ----------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Soroban multi-sig vault**                     | ✅ **Live on testnet**   | create vault, signer mgmt, threshold, propose, approve, execute, cancel — 7/7 contract tests pass                                                                                                                     |
+| **Transparent flow**                            | ✅ **Fully working**     | propose → approve → execute moves **real XLM** on testnet, wallet-signed                                                                                                                                              |
+| **ZK voter privacy**                            | ✅ **Real ZK**           | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), real Groth16 proofs generated **in-browser**, `approve_zk` records the nullifier on-chain — identity hidden in the event, double-vote prevented |
+| **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
+| **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
+| **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
+| **On-chain Groth16 verify**                     | 🚧 **Roadmap**           | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step — now unblocked by the Jan-2026 "X-Ray" upgrade (BN254 + Poseidon host functions on Soroban)    |
 
 > **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
 
@@ -88,25 +90,25 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 
 ## Tech stack
 
-| Layer | Tech |
-|---|---|
-| Smart contract | Rust + Soroban SDK 23 |
-| ZK circuit | circom 2.2 + circomlib (Poseidon, Merkle membership) |
-| Proving | snarkjs (Groth16, BN254) — runs in the browser |
-| Frontend | Next.js 14 (App Router) + React 18 + TypeScript |
-| Wallet | Freighter (`@stellar/freighter-api`) |
-| SDK | `@stellar/stellar-sdk` 16 (Protocol 23) |
+| Layer          | Tech                                                 |
+| -------------- | ---------------------------------------------------- |
+| Smart contract | Rust + Soroban SDK 23                                |
+| ZK circuit     | circom 2.2 + circomlib (Poseidon, Merkle membership) |
+| Proving        | snarkjs (Groth16, BN254) — runs in the browser       |
+| Frontend       | Next.js 14 (App Router) + React 18 + TypeScript      |
+| Wallet         | Freighter (`@stellar/freighter-api`)                 |
+| SDK            | `@stellar/stellar-sdk` 16 (Protocol 23)              |
 
 ---
 
 ## Live testnet deployment
 
-| Contract | ID |
-|---|---|
-| **Vault Factory** (deploys one contract per vault) | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
-| **Shield Pool** (our confidential layer) | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
-| Token (XLM SAC) | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
-| Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…` |
+| Contract                                               | ID                                                         |
+| ------------------------------------------------------ | ---------------------------------------------------------- |
+| **Vault Factory** (deploys one contract per vault)     | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
+| **Shield Pool** (our confidential layer)               | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
+| Token (XLM SAC)                                        | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
+| Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…`                                  |
 
 Each vault is its own contract, deployed by the factory — view a vault by its address on stellar.expert.
 🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
@@ -116,6 +118,7 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ## Run it locally
 
 ### 1. Contract tests
+
 ```bash
 cd stellar-vault
 cargo test            # 7/7 pass
@@ -123,6 +126,7 @@ cargo build --target wasm32v1-none --release
 ```
 
 ### 2. ZK circuit + proof (already built; to rebuild)
+
 ```bash
 cd circuits
 circom voteApproval.circom --wasm --r1cs -l node_modules/circomlib/circuits -o build
@@ -131,11 +135,13 @@ node test.mjs         # ✓ proof generated, verified, soundness + double-vote c
 ```
 
 ### 3. Frontend
+
 ```bash
 cd web
 npm install
 npm run dev           # http://localhost:3000
 ```
+
 Connect **Freighter** (Testnet, friendbot-funded), then:
 **Create Vault → New Transaction → Approve → Execute** (transparent moves real XLM; private generates a real ZK proof).
 
@@ -157,8 +163,8 @@ Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier i
 ## Demo flow (3 minutes)
 
 1. **Create a vault** — connect Freighter, pick signers + threshold, sign on-chain.
-2. **Transparent transaction** — propose 10 XLM → approve → execute. Recipient balance visibly increases. *"Alice, Bob approved. 10 XLM → GXYZ…"*
-3. **Private transaction** — toggle to Private, propose → **Approve (ZK)**: a real Groth16 proof is generated in-browser (witness → proof → submit), the nullifier lands on-chain. *"🔒 approved — voter identity hidden."*
+2. **Transparent transaction** — propose 10 XLM → approve → execute. Recipient balance visibly increases. _"Alice, Bob approved. 10 XLM → GXYZ…"_
+3. **Private transaction** — toggle to Private, propose → **Approve (ZK)**: a real Groth16 proof is generated in-browser (witness → proof → submit), the nullifier lands on-chain. _"🔒 approved — voter identity hidden."_
 4. **Compare** — same vault, same threshold, two privacy levels, side by side.
 
 ---
@@ -190,4 +196,4 @@ stellar-vault/   earlier single-contract design (the "B" approach) — kept for 
 
 ---
 
-*Built for the Stellar Hacks ZK Hackathon. Privacy primitives adapted from Nethermind's `stellar-private-payments` (Apache-2.0).*
+_Built for the Stellar Hacks ZK Hackathon. Privacy primitives adapted from Nethermind's `stellar-private-payments` (Apache-2.0)._
