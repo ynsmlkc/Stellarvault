@@ -181,6 +181,20 @@ Because each vault is a programmable smart contract (not native multi-sig), it's
 
 ---
 
+## How it evolved — feedback & iteration
+
+I tested the dApp continuously as a user and iterated based on what broke or felt wrong. Every one of these is a separate commit in this repo's history:
+
+- **Biggest one:** while testing, I noticed every vault shared a single balance. That pushed me to re-architect the whole thing into a **Safe-style factory** — one separate contract per vault, with isolated balances and an on-chain registry. A major rewrite driven directly by testing.
+- A co-signer on a second account **couldn't see the shared vault**, so I changed the factory to register each vault under **every signer**, not just the owner.
+- Private transactions weren't moving funds and the "private hides everything" framing was misleading — so I made private execution **actually move funds** and reframed it honestly: private = **anonymous approvals**, with a separate shielded pool for hiding amount/recipient.
+- Execute occasionally failed on the first try due to RPC lag → added **retries + longer polling**.
+- The "Approve" button stayed after approving and errored on re-click → added a clear **"you approved · waiting"** state.
+- On mobile it wasn't responsive → added a **responsive layout**.
+- Removed confusing / dead UI (a demo vault, a non-functional wallet button, a duplicate CTA).
+
+---
+
 ## Repository layout
 
 ```
