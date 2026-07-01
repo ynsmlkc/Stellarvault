@@ -1,0 +1,45 @@
+name: CI
+
+# Continuous integration: every push / PR to main runs the Soroban contract
+# tests and builds the Next.js dApp. Continuous deployment is handled by Vercel,
+# which auto-deploys the `web/` app on every push to main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contracts:
+    name: Soroban contract tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [vault-instance, vault-factory, shield-pool, stellar-vault]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }}
+      - name: cargo test (${{ matrix.crate }})
+        run: cargo test --manifest-path ${{ matrix.crate }}/Cargo.toml
+
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+      - name: Build
+        run: npm run build
+        working-directory: web

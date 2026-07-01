@@ -5,6 +5,7 @@
 > **The first _confidential_ multi-signature treasury on Stellar — each transaction can be transparent _or_ private.**
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
+[![CI](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml/badge.svg)](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml)
 [![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
 [![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2023-C9A86A)](stellar-vault/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
