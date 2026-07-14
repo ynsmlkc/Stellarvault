@@ -21,8 +21,9 @@ Thumbs.db
 
 # Circom build artifacts
 circuits/build/
-*.zkey
 *.r1cs
+# NOTE: web/public/zk-wasm/*.zkey and *.wasm are runtime assets tracked via Git LFS
+# (see .gitattributes). Do not add a global *.zkey ignore back — it would drop them.
 
 # Local config
 .claude/
