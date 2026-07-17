@@ -123,9 +123,13 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-cd stellar-vault
-cargo test            # 7/7 pass
-cargo build --target wasm32v1-none --release
+# 19 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 7 pass  (multi-sig vault)
+cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
+cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
+
+# build a contract to wasm
+cargo build --manifest-path vault-instance/Cargo.toml --target wasm32v1-none --release
 ```
 
 ### 2. ZK circuit + proof (already built; to rebuild)
