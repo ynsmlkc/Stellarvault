@@ -1,6 +1,6 @@
 # 🔐 Stellar Vault — Confidential Multi-Sig Treasury
 
-**▶ [Watch the demo](https://youtu.be/eVrGjdqSn-4)**
+**🌐 [Live app](https://stellarvault-olive.vercel.app) &nbsp;·&nbsp; ▶ [Watch the demo](https://youtu.be/eVrGjdqSn-4) &nbsp;·&nbsp; 📊 [Pitch deck](https://stellarvault-olive.vercel.app/pitch.html)**
 
 > **The first _confidential_ multi-signature treasury on Stellar — each transaction can be transparent _or_ private.**
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
@@ -103,6 +103,8 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 ---
 
 ## Live testnet deployment
+
+**🌐 Live app: https://stellarvault-olive.vercel.app** &nbsp;·&nbsp; **📊 Pitch deck: https://stellarvault-olive.vercel.app/pitch.html**
 
 | Contract                                               | ID                                                         |
 | ------------------------------------------------------ | ---------------------------------------------------------- |

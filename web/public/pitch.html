@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Stellar Vault — the first confidential multi-signature treasury on Stellar. Pitch deck.">
+<title>Stellar Vault — Pitch Deck</title>
+<style>
+  :root{
+    --ink:#0C0E13; --ink-2:#13161E; --ink-3:#1B1F29;
+    --line:rgba(214,190,138,.15); --line-2:rgba(214,190,138,.28);
+    --gold:#D9B978; --gold-2:#EBD196; --gold-dim:#9C8250;
+    --green:#86C271; --violet:#9E8FE6;
+    --cream:#ECE6D8; --text:#C4C0B3; --muted:#847E71;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+    --slidemax:1040px;
+  }
+  /* Committed single-world (a vault is a dark room): keep the deck dark in both themes so the toggle never yields a half-styled surface. */
+  @media (prefers-color-scheme:light){ :root{ --ink:#0C0E13; } }
+  :root[data-theme="light"],:root[data-theme="dark"]{ --ink:#0C0E13; }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--ink); color:var(--text);
+    font-family:var(--sans); font-size:17px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  body::before{ /* ambient vault light + faint ledger grid */
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(120% 80% at 82% -10%, rgba(217,185,120,.10), transparent 55%),
+      radial-gradient(90% 70% at -5% 110%, rgba(158,143,230,.07), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 46px, rgba(214,190,138,.028) 46px 47px),
+      repeating-linear-gradient(90deg, transparent 0 46px, rgba(214,190,138,.028) 46px 47px);
+  }
+
+  /* ---- deck mechanics ---- */
+  .deck{position:relative;z-index:1;height:100vh;overflow:hidden}
+  .track{display:flex;height:100%;transition:transform .62s cubic-bezier(.76,0,.24,1)}
+  .slide{
+    flex:0 0 100%;width:100vw;height:100vh;overflow-y:auto;
+    display:flex;flex-direction:column;justify-content:center;
+    padding:clamp(28px,6vw,110px);
+  }
+  .inner{width:100%;max-width:var(--slidemax);margin:0 auto}
+
+  /* ---- shared type ---- */
+  .eyebrow{
+    font-family:var(--mono);font-size:12px;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--gold);display:flex;align-items:center;gap:12px;margin:0 0 26px;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--gold);opacity:.6}
+  h1,h2,h3{font-family:var(--serif);color:var(--cream);text-wrap:balance;font-weight:600;margin:0}
+  h1{font-size:clamp(38px,6.4vw,78px);line-height:1.02;letter-spacing:-.015em}
+  h2{font-size:clamp(30px,4.6vw,54px);line-height:1.06;letter-spacing:-.01em}
+  h3{font-size:clamp(20px,2.4vw,27px);line-height:1.15}
+  p{margin:0 0 16px;max-width:64ch}
+  strong{color:var(--cream);font-weight:600}
+  .lead{font-size:clamp(18px,2vw,22px);color:var(--text)}
+  .mono{font-family:var(--mono)}
+  .hi-g{color:var(--green)} .hi-v{color:var(--violet)} .hi-gold{color:var(--gold)}
+
+  /* ---- cover ---- */
+  .cover .inner{max-width:960px}
+  .brandmark{display:flex;align-items:center;gap:14px;margin-bottom:auto}
+  .glyph{width:30px;height:30px;border:1.5px solid var(--gold);border-radius:7px;position:relative;flex:0 0 auto}
+  .glyph::before{content:"";position:absolute;left:50%;top:52%;width:8px;height:8px;border:1.5px solid var(--gold);border-radius:50%;transform:translate(-50%,-50%)}
+  .glyph::after{content:"";position:absolute;left:50%;top:calc(52% + 4px);width:1.5px;height:8px;background:var(--gold);transform:translateX(-50%)}
+  .brandname{font-family:var(--mono);font-size:13px;letter-spacing:.28em;text-transform:uppercase;color:var(--cream)}
+  .cover h1{margin:8px 0 0}
+  .cover .sub{font-size:clamp(17px,1.9vw,21px);color:var(--text);max-width:52ch;margin:26px 0 0}
+  .cover .sub b{color:var(--gold)}
+  .taglist{display:flex;flex-wrap:wrap;gap:10px;margin:38px 0 0}
+  .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);
+    border:1px solid var(--line-2);border-radius:100px;padding:7px 14px;display:inline-flex;gap:8px;align-items:center}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
+  .dot.v{background:var(--violet);box-shadow:0 0 10px var(--violet)}
+  .dot.g{background:var(--gold);box-shadow:0 0 10px var(--gold)}
+
+  /* ---- ledger duality (signature motif) ---- */
+  .ledger{display:grid;gap:14px;margin:30px 0 0}
+  .row{border:1px solid var(--line);border-radius:12px;background:var(--ink-2);padding:16px 18px;
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .row .who{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);min-width:104px}
+  .val{font-family:var(--mono);font-size:14.5px;color:var(--cream)}
+  .pill{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:5px 11px;border-radius:100px;margin-left:auto}
+  .pill.pub{color:var(--green);border:1px solid rgba(134,194,113,.4);background:rgba(134,194,113,.08)}
+  .pill.prv{color:var(--violet);border:1px solid rgba(158,143,230,.4);background:rgba(158,143,230,.08)}
+  .seal{font-family:var(--mono);font-size:13.5px;color:var(--gold);
+    border:1px dashed var(--gold-dim);border-radius:8px;padding:8px 12px;background:rgba(217,185,120,.06);
+    display:inline-flex;align-items:center;gap:9px;letter-spacing:.02em}
+  .seal svg{flex:0 0 auto}
+
+  /* ---- generic content bits ---- */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .card{border:1px solid var(--line);border-radius:14px;background:var(--ink-2);padding:22px 22px 24px}
+  .card h3{margin-bottom:8px}
+  .card p{font-size:15.5px;margin:0;color:var(--text)}
+  .card .k{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:14px}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin-top:32px}
+  .step{flex:1 1 150px;border:1px solid var(--line);border-radius:14px;background:var(--ink-2);padding:20px;position:relative}
+  .step + .step{margin-left:14px}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--gold-dim);letter-spacing:.1em}
+  .step h3{font-size:19px;margin:10px 0 6px}
+  .step code{font-family:var(--mono);font-size:12.5px;color:var(--gold)}
+  .step p{font-size:14px;margin:8px 0 0;color:var(--muted)}
+  .arrow{display:flex;align-items:center;color:var(--gold-dim);font-family:var(--mono);padding:0 4px}
+
+  ul.clean{list-style:none;padding:0;margin:22px 0 0;display:grid;gap:14px}
+  ul.clean li{padding-left:26px;position:relative;max-width:70ch;color:var(--text)}
+  ul.clean li::before{content:"";position:absolute;left:0;top:11px;width:8px;height:8px;border-radius:2px;
+    background:var(--gold);transform:rotate(45deg)}
+  ul.clean li b{color:var(--cream)}
+
+  .statusgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:26px}
+  .st{display:flex;gap:13px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;background:var(--ink-2);padding:15px 17px}
+  .st .ic{font-family:var(--mono);font-size:12px;margin-top:2px}
+  .st.live .ic{color:var(--green)} .st.road .ic{color:var(--gold)}
+  .st b{color:var(--cream);display:block;font-size:15.5px;font-family:var(--sans);font-weight:600}
+  .st span{font-size:13.5px;color:var(--muted)}
+
+  .addr{display:grid;gap:12px;margin-top:26px}
+  .addr .a{border:1px solid var(--line);border-radius:12px;background:var(--ink-2);padding:15px 18px;
+    display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+  .addr .a .lbl{color:var(--cream);font-weight:600;font-size:15px}
+  .addr .a .lbl small{display:block;color:var(--muted);font-weight:400;font-size:12.5px;margin-top:3px}
+  .addr .a .id{font-family:var(--mono);font-size:12.5px;color:var(--gold);word-break:break-all;text-align:right;max-width:56ch}
+
+  .links{display:flex;flex-wrap:wrap;gap:14px;margin-top:34px}
+  .lk{font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--cream);text-decoration:none;
+    border:1px solid var(--line-2);border-radius:10px;padding:12px 18px;display:inline-flex;align-items:center;gap:10px;transition:border-color .2s,color .2s}
+  .lk:hover,.lk:focus-visible{border-color:var(--gold);color:var(--gold);outline:none}
+  .lk.primary{background:var(--gold);color:#191408;border-color:var(--gold)}
+  .lk.primary:hover,.lk.primary:focus-visible{background:var(--gold-2);color:#191408}
+
+  .kicker{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:30px;max-width:66ch}
+  .big-quote{font-family:var(--serif);font-size:clamp(22px,3vw,34px);color:var(--cream);line-height:1.28;text-wrap:balance;border-left:2px solid var(--gold);padding-left:22px;margin:6px 0 0}
+
+  /* zk crypto panel */
+  .zk{display:grid;grid-template-columns:1.1fr .9fr;gap:26px;margin-top:26px;align-items:start}
+  .zkbox{border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(158,143,230,.06),rgba(19,22,30,0));padding:22px}
+  .zkbox .k{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--violet);margin-bottom:14px;display:block}
+  .pubin{font-family:var(--mono);font-size:12.5px;color:var(--text);background:var(--ink);border:1px solid var(--line);border-radius:9px;padding:12px 13px;line-height:1.7;word-break:break-word}
+  .pubin b{color:var(--violet)}
+
+  /* ---- chrome ---- */
+  .chrome{position:fixed;z-index:5;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;
+    padding:16px clamp(20px,4vw,48px);pointer-events:none}
+  .brand-min{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+  .nav{display:flex;align-items:center;gap:14px;pointer-events:auto}
+  .dots{display:flex;gap:7px}
+  .dots button{width:8px;height:8px;padding:0;border-radius:50%;border:0;background:var(--ink-3);cursor:pointer;transition:background .25s,transform .25s}
+  .dots button[aria-current="true"]{background:var(--gold);transform:scale(1.35)}
+  .dots button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .counter{font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--muted);font-variant-numeric:tabular-nums}
+  .counter b{color:var(--cream)}
+  .arrows{display:flex;gap:6px}
+  .arrows button{width:36px;height:36px;border-radius:9px;border:1px solid var(--line-2);background:var(--ink-2);color:var(--cream);
+    cursor:pointer;font-size:16px;display:grid;place-items:center;transition:border-color .2s,color .2s}
+  .arrows button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .arrows button:disabled{opacity:.3;cursor:default}
+  .arrows button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .hint{position:fixed;top:16px;right:clamp(20px,4vw,48px);z-index:5;font-family:var(--mono);font-size:11px;
+    letter-spacing:.1em;color:var(--muted);text-transform:uppercase;pointer-events:none}
+
+  /* entrance animation */
+  [data-r]{opacity:0;transform:translateY(16px)}
+  .slide.is-active [data-r]{opacity:1;transform:none;transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+  .slide.is-active [data-r]{transition-delay:calc(var(--i,0) * 90ms)}
+
+  @media (max-width:820px){
+    .grid2,.grid3,.zk,.statusgrid{grid-template-columns:1fr}
+    .step + .step{margin-left:0;margin-top:12px}
+    .flow{flex-direction:column}
+    .arrow{display:none}
+    .addr .a{flex-direction:column;align-items:flex-start}
+    .addr .a .id{text-align:left}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .track{transition:none}
+    [data-r]{opacity:1;transform:none;transition:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="hint">← → navigate · F fullscreen</div>
+
+<div class="deck">
+  <div class="track" id="track">
+
+    <!-- 1 · COVER -->
+    <section class="slide cover is-active" aria-label="Cover">
+      <div class="inner">
+        <div class="brandmark" data-r style="--i:0">
+          <span class="glyph" aria-hidden="true"></span>
+          <span class="brandname">Stellar&nbsp;Vault</span>
+        </div>
+        <h1 data-r style="--i:1">Approve as a team.<br><span class="hi-gold">Reveal nothing.</span></h1>
+        <p class="sub" data-r style="--i:2">The first <b>confidential</b> multi-signature treasury on Stellar. Every transaction can be transparent — or private — <b>and you decide, per transaction, what the chain is allowed to see.</b></p>
+        <div class="taglist" data-r style="--i:3">
+          <span class="tag"><span class="dot"></span>Live on Testnet</span>
+          <span class="tag"><span class="dot g"></span>Soroban · Rust SDK 23</span>
+          <span class="tag"><span class="dot v"></span>Real Groth16 ZK</span>
+          <span class="tag">CI Green</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 · PROBLEM -->
+    <section class="slide" aria-label="The problem">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">01 — The problem</p>
+        <h2 data-r style="--i:1">A public ledger tells everyone everything.</h2>
+        <p class="lead" data-r style="--i:2">Stellar already has multi-sig — natively, and through <span class="mono">LOBSTR&nbsp;Vault</span>, <span class="mono">Solar</span>, <span class="mono">StellarGuard</span>. Every one shares the same two limits.</p>
+        <div class="grid2" style="margin-top:28px">
+          <div class="card" data-r style="--i:3">
+            <span class="k">Fully transparent</span>
+            <p>Every fund movement reveals <strong>who proposed, who approved, how much, and to whom.</strong> For payroll, OTC deals, grants or treasury rebalancing, that leaks salaries, strategy and counterparties.</p>
+          </div>
+          <div class="card" data-r style="--i:4">
+            <span class="k">Native = not programmable</span>
+            <p>Native multi-sig is a fixed protocol feature — signers, weights, thresholds, nothing more. <strong>No custom on-chain logic:</strong> no spending limits, time-locks, modules, or zero-knowledge.</p>
+          </div>
+        </div>
+        <p class="kicker" data-r style="--i:5">There is no <b style="color:var(--gold)">confidential</b> multi-sig on Stellar, and no programmable one. That is the gap.</p>
+      </div>
+    </section>
+
+    <!-- 3 · SOLUTION (signature motif) -->
+    <section class="slide" aria-label="The solution">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">02 — The solution</p>
+        <h2 data-r style="--i:1">Same vault, same threshold — <span class="hi-gold">two privacy levels.</span></h2>
+        <p class="lead" data-r style="--i:2">A Soroban smart-contract multi-sig where the initiator picks privacy <strong>per transaction</strong>. The same approval, recorded two different ways:</p>
+        <div class="ledger">
+          <div class="row" data-r style="--i:3">
+            <span class="who">Transparent</span>
+            <span class="val hi-g">Alice ✓ &nbsp; Bob ✓</span> <span class="val">→ 10 XLM → GXYZ…</span>
+            <span class="pill pub">Public ledger</span>
+          </div>
+          <div class="row" data-r style="--i:4">
+            <span class="who">Private · ZK</span>
+            <span class="seal" title="on-chain record">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              nullifier · 0x9f3c…a71e
+            </span>
+            <span class="val" style="color:var(--muted)">“a valid signer approved”</span>
+            <span class="pill prv">Identity hidden</span>
+          </div>
+        </div>
+        <p class="kicker" data-r style="--i:5">Voter privacy hides <b>who approved</b>. A separate <b style="color:var(--violet)">shielded pool</b> hides <b>amount + recipient</b> and severs the deposit↔recipient link entirely.</p>
+      </div>
+    </section>
+
+    <!-- 4 · HOW IT WORKS -->
+    <section class="slide" aria-label="How it works">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">03 — How it works</p>
+        <h2 data-r style="--i:1">One flow. You choose the mode at step two.</h2>
+        <div class="flow">
+          <div class="step" data-r style="--i:2"><span class="n">STEP 01</span><h3>Propose</h3><code>propose()</code><p>Any signer proposes a transfer and picks transparent or private mode.</p></div>
+          <div class="arrow" data-r style="--i:3">→</div>
+          <div class="step" data-r style="--i:4"><span class="n">STEP 02</span><h3>Approve</h3><code>approve() · approve_zk()</code><p>Co-signers approve. In ZK mode a Groth16 proof is generated <b>in-browser</b>; only a nullifier hits the chain.</p></div>
+          <div class="arrow" data-r style="--i:5">→</div>
+          <div class="step" data-r style="--i:6"><span class="n">STEP 03</span><h3>Execute</h3><code>execute()</code><p>Threshold met → the contract moves real XLM on testnet, wallet-signed.</p></div>
+        </div>
+        <p class="kicker" data-r style="--i:7">Double-voting is prevented by the nullifier; the signer’s identity is never recoverable from it.</p>
+      </div>
+    </section>
+
+    <!-- 5 · WHY SMART CONTRACT -->
+    <section class="slide" aria-label="Why a smart-contract vault">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">04 — Why a contract, not native multi-sig</p>
+        <h2 data-r style="--i:1">Native multi-sig counts signatures. That’s all it can do.</h2>
+        <p class="lead" data-r style="--i:2">Stellar Vault is a <strong>Soroban smart contract</strong> — which is exactly what makes the rest possible:</p>
+        <ul class="clean">
+          <li data-r style="--i:3"><b>Zero-knowledge approvals</b> — verifying + recording a Groth16 nullifier on approval is logic a native account simply cannot execute.</li>
+          <li data-r style="--i:4"><b>Confidential execution</b> — moving funds through a shielded pool needs a programmable contract.</li>
+          <li data-r style="--i:5"><b>A factory, one contract per vault</b> — each vault is its own deployed contract with its own address and balance, Gnosis-Safe-style.</li>
+        </ul>
+        <blockquote class="big-quote" data-r style="--i:6">LOBSTR Vault is “Stellar’s signing app.”<br>Stellar Vault is “Stellar’s <span class="hi-gold">confidential, programmable</span> Safe.”</blockquote>
+      </div>
+    </section>
+
+    <!-- 6 · ARCHITECTURE -->
+    <section class="slide" aria-label="Architecture">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">05 — Architecture</p>
+        <h2 data-r style="--i:1">A factory, a vault per team, a shielded pool.</h2>
+        <div class="grid3" style="margin-top:26px">
+          <div class="card" data-r style="--i:2"><span class="k">Vault Factory</span><p>Deploys a fresh contract per vault — own address, own native balance, on-chain <span class="mono hi-gold">owner→vaults</span> registry. True Safe architecture.</p></div>
+          <div class="card" data-r style="--i:3"><span class="k">Vault Instance</span><p>Signer management, threshold, <span class="mono">propose</span> / <span class="mono">approve</span> / <span class="mono">approve_zk</span> / <span class="mono">execute</span> / <span class="mono">cancel</span>.</p></div>
+          <div class="card" data-r style="--i:4"><span class="k">Shield Pool + Circuits</span><p>Our own <span class="mono">voteApproval</span> + <span class="mono">confidentialTransfer</span> circom circuits; commitments &amp; nullifiers on-chain, links severed.</p></div>
+        </div>
+        <div class="grid3" style="margin-top:18px">
+          <div class="card" data-r style="--i:5"><span class="k" style="color:var(--muted)">Frontend</span><p>Next.js 14 · React 18 · TypeScript · Freighter wallet · snarkjs prover.</p></div>
+          <div class="card" data-r style="--i:6"><span class="k" style="color:var(--muted)">Contracts</span><p>Rust · Soroban SDK 23 · Protocol 23 · <span class="hi-g">17 tests passing</span>.</p></div>
+          <div class="card" data-r style="--i:7"><span class="k" style="color:var(--muted)">Proving</span><p>circom 2.2 · circomlib · Groth16 · BN254 · runs in the browser (~0.3s).</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7 · ZK -->
+    <section class="slide" aria-label="Zero-knowledge">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">06 — The zero-knowledge core</p>
+        <h2 data-r style="--i:1">Prove you’re a signer — <span style="color:var(--violet)">without saying which one.</span></h2>
+        <div class="zk">
+          <div>
+            <ul class="clean" style="margin-top:6px">
+              <li data-r style="--i:2"><b>Membership</b> — “I know a secret whose commitment is in this vault’s signer Merkle tree.” → I’m valid.</li>
+              <li data-r style="--i:3"><b>Binding</b> — the vote is tied to this exact <span class="mono">(vaultId, txHash)</span>.</li>
+              <li data-r style="--i:4"><b>Nullifier</b> — <span class="mono">Poseidon(commitment, txHash)</span> is a unique one-way tag → double-voting detectable, identity <b>not</b> recoverable.</li>
+            </ul>
+          </div>
+          <div class="zkbox" data-r style="--i:5">
+            <span class="k">Public inputs — all the chain sees</span>
+            <div class="pubin">[ <b>vaultId</b>, <b>txHash</b>, <b>signerRoot</b>, <b>nullifier</b> ]</div>
+            <p style="font-size:13.5px;color:var(--muted);margin:14px 0 0">Everything else stays private. The on-chain <span class="mono">ZKApprovalEvent</span> emits <b style="color:var(--violet)">only the nullifier</b> — never the signer.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8 · STATUS -->
+    <section class="slide" aria-label="What's built">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">07 — What’s built (honest status)</p>
+        <h2 data-r style="--i:1">Deployed, wallet-signed, and tested — today.</h2>
+        <div class="statusgrid">
+          <div class="st live" data-r style="--i:2"><span class="ic">●&nbsp;LIVE</span><div><b>Soroban multi-sig vault</b><span>create · signers · threshold · propose · approve · execute · cancel</span></div></div>
+          <div class="st live" data-r style="--i:3"><span class="ic">●&nbsp;LIVE</span><div><b>Transparent flow</b><span>propose → approve → execute moves real XLM, wallet-signed</span></div></div>
+          <div class="st live" data-r style="--i:4"><span class="ic">●&nbsp;LIVE</span><div><b>ZK voter privacy</b><span>real Groth16 proofs in-browser · nullifier recorded on-chain</span></div></div>
+          <div class="st live" data-r style="--i:5"><span class="ic">●&nbsp;LIVE</span><div><b>Safe-style factory</b><span>one contract per vault · isolated balances · on-chain registry</span></div></div>
+          <div class="st live" data-r style="--i:6"><span class="ic">●&nbsp;LIVE</span><div><b>Confidential transfers</b><span>shield-pool: unlinkable sends · commitments + nullifiers only</span></div></div>
+          <div class="st road" data-r style="--i:7"><span class="ic">◆&nbsp;NEXT</span><div><b>On-chain Groth16 verify</b><span>unblocked by the Jan-2026 “X-Ray” BN254 + Poseidon host functions</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 · LIVE -->
+    <section class="slide" aria-label="Live on testnet">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">08 — Live on testnet</p>
+        <h2 data-r style="--i:1">Real contracts. Verifiable on-chain right now.</h2>
+        <div class="addr">
+          <div class="a" data-r style="--i:2"><div class="lbl">Vault Factory<small>deploys one contract per vault</small></div><div class="id">CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J</div></div>
+          <div class="a" data-r style="--i:3"><div class="lbl">Shield Pool<small>confidential-transfer layer</small></div><div class="id">CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA</div></div>
+          <div class="a" data-r style="--i:4"><div class="lbl">Token<small>XLM Stellar Asset Contract</small></div><div class="id">CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC</div></div>
+        </div>
+        <div class="links" data-r style="--i:5">
+          <a class="lk" href="https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J" target="_blank" rel="noopener">🔭 View on stellar.expert</a>
+          <a class="lk" href="https://youtu.be/eVrGjdqSn-4" target="_blank" rel="noopener">▶ Watch the demo</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 · FEEDBACK -->
+    <section class="slide" aria-label="Feedback and iteration">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">09 — How it evolved</p>
+        <h2 data-r style="--i:1">Every fix here is a real commit, driven by real testing.</h2>
+        <ul class="clean">
+          <li data-r style="--i:2"><b>The big one:</b> testing revealed every vault shared one balance → I re-architected into a <b>Safe-style factory</b>, one isolated contract per vault. A major rewrite driven directly by using the product.</li>
+          <li data-r style="--i:3">A co-signer on a second account couldn’t see the shared vault → the factory now registers each vault under <b>every signer</b>, not just the owner.</li>
+          <li data-r style="--i:4">“Private hides everything” was misleading → reframed honestly: private = <b>anonymous approvals</b>, with a separate shielded pool for amount/recipient.</li>
+          <li data-r style="--i:5">Execute failed on RPC lag → added <b>retries + longer polling</b>. Approve button re-click errored → added a clear <b>“you approved · waiting”</b> state. Mobile → responsive layout.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 11 · CLOSE -->
+    <section class="slide" aria-label="Roadmap and links">
+      <div class="inner">
+        <p class="eyebrow" data-r style="--i:0">10 — Where it goes</p>
+        <h2 data-r style="--i:1">A confidential, programmable Safe for Stellar.</h2>
+        <div class="grid2" style="margin-top:24px">
+          <div class="card" data-r style="--i:2"><span class="k">Roadmap</span><p>On-chain Groth16 verifier · Safe-style modules &amp; guards (spending limits, time-locks, session keys, social recovery) · relayer / meta-tx for full approver anonymity · confidential execution wired into the vault.</p></div>
+          <div class="card" data-r style="--i:3"><span class="k">Foundation</span><p>Because each vault is a programmable contract — not native multi-sig — it’s the right base for everything native multi-sig structurally can’t add.</p></div>
+        </div>
+        <div class="links" data-r style="--i:4">
+          <a class="lk primary" href="https://stellarvault-olive.vercel.app" target="_blank" rel="noopener">◆ Live app</a>
+          <a class="lk" href="https://github.com/ynsmlkc/Stellarvault" target="_blank" rel="noopener">◇ GitHub repository</a>
+          <a class="lk" href="https://youtu.be/eVrGjdqSn-4" target="_blank" rel="noopener">▶ Demo video</a>
+        </div>
+        <p class="kicker" data-r style="--i:5">Built for the Stellar Hacks ZK Hackathon · privacy primitives adapted from Nethermind’s <span class="mono">stellar-private-payments</span> (Apache-2.0).</p>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- chrome -->
+<div class="chrome">
+  <span class="brand-min">Stellar Vault</span>
+  <div class="nav">
+    <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
+    <span class="counter"><b id="cur">01</b> / <span id="total">11</span></span>
+    <div class="arrows">
+      <button id="prev" aria-label="Previous slide">‹</button>
+      <button id="next" aria-label="Next slide">›</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var track = document.getElementById('track');
+  var cur = document.getElementById('cur');
+  var dotsWrap = document.getElementById('dots');
+  var prev = document.getElementById('prev');
+  var next = document.getElementById('next');
+  var i = 0, n = slides.length;
+  document.getElementById('total').textContent = String(n).padStart(2,'0');
+
+  slides.forEach(function(s,idx){
+    var b = document.createElement('button');
+    b.setAttribute('role','tab');
+    b.setAttribute('aria-label','Go to slide '+(idx+1));
+    b.addEventListener('click', function(){ go(idx); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function go(x){
+    i = Math.max(0, Math.min(n-1, x));
+    track.style.transform = 'translateX(-'+(i*100)+'%)';
+    cur.textContent = String(i+1).padStart(2,'0');
+    prev.disabled = i===0; next.disabled = i===n-1;
+    slides.forEach(function(s,idx){
+      var on = idx===i;
+      s.classList.toggle('is-active', on);
+      dots[idx].setAttribute('aria-current', on ? 'true':'false');
+    });
+  }
+  prev.addEventListener('click', function(){ go(i-1); });
+  next.addEventListener('click', function(){ go(i+1); });
+
+  document.addEventListener('keydown', function(e){
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){ e.preventDefault(); go(i+1); }
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){ e.preventDefault(); go(i-1); }
+    else if(e.key==='Home'){ go(0); }
+    else if(e.key==='End'){ go(n-1); }
+    else if(e.key==='f'||e.key==='F'){
+      if(!document.fullscreenElement){ (document.documentElement.requestFullscreen||function(){})(); }
+      else { (document.exitFullscreen||function(){})(); }
+    }
+  });
+  // touch swipe
+  var x0=null;
+  document.addEventListener('touchstart',function(e){ x0=e.touches[0].clientX; },{passive:true});
+  document.addEventListener('touchend',function(e){
+    if(x0===null) return;
+    var dx=e.changedTouches[0].clientX-x0;
+    if(Math.abs(dx)>50){ go(dx<0 ? i+1 : i-1); }
+    x0=null;
+  },{passive:true});
+
+  go(0);
+})();
+</script>
+</body>
+</html>
