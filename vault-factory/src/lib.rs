@@ -23,6 +23,9 @@ pub struct VaultCreated {
     pub vault: Address,
 }
 
+#[cfg(test)]
+mod test;
+
 #[contract]
 pub struct VaultFactory;
 
