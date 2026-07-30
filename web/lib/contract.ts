@@ -27,6 +27,8 @@ const addr = (a: string) => new Address(a).toScVal();
 const bool = (b: boolean) => nativeToScVal(b);
 const str = (s: string) => nativeToScVal(s, { type: "string" });
 const addrVec = (xs: string[]) => xdr.ScVal.scvVec(xs.map((a) => new Address(a).toScVal()));
+/** One field of a struct. Soroban expects struct fields in symbol order. */
+const entry = (k: string, v: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
 
 /* ---------------- types ---------------- */
 export type VaultConfig = {
@@ -47,6 +49,81 @@ export type Proposal = {
   executed: boolean;
   created_at: number;
 };
+
+/** Owner-configurable spending guards. 0 / false = that guard is off. */
+export type Policy = {
+  max_per_tx: bigint;
+  spending_cap: bigint;
+  cap_window_ledgers: number;
+  timelock_ledgers: number;
+  allowlist_only: boolean;
+};
+
+export const OPEN_POLICY: Policy = {
+  max_per_tx: 0n,
+  spending_cap: 0n,
+  cap_window_ledgers: 0,
+  timelock_ledgers: 0,
+  allowlist_only: false,
+};
+
+/** Guard state of one proposal — one read, everything the card needs. */
+export type ProposalStatus = {
+  cancelled: boolean;
+  executed: boolean;
+  approval_count: number;
+  threshold: number;
+  unlock_ledger: number;
+  current_ledger: number;
+  is_batch: boolean;
+  amount: bigint;
+};
+
+export type BatchItem = { target: string; amount: bigint };
+
+/* ---------------- contract errors ---------------- */
+/** Mirrors `Error` in vault-instance/src/lib.rs — keep the codes in sync. */
+const VAULT_ERRORS: Record<number, string> = {
+  1: "A vault needs at least one signer.",
+  2: "Invalid threshold for this signer set.",
+  3: "That wallet is not a signer of this vault.",
+  4: "Only the proposer or the vault owner can cancel this.",
+  5: "Proposal not found.",
+  6: "This proposal was already executed.",
+  7: "This proposal was cancelled.",
+  8: "You already approved this proposal.",
+  9: "Amount must be greater than zero.",
+  10: "Not enough approvals yet.",
+  11: "The vault doesn't hold enough to cover this.",
+  12: "This approval was already counted (nullifier used).",
+  13: "The ZK proof was empty.",
+  14: "Blocked by the per-transaction limit.",
+  15: "Blocked by the spending cap for this window.",
+  16: "Time-lock is still active — this can't execute yet.",
+  17: "Recipient is not on the allowlist.",
+  18: "The allowlist is full (50 max).",
+  19: "Invalid policy — limits cannot be negative.",
+  20: "That address is already a signer.",
+  21: "That address is not a signer.",
+  22: "A batch needs at least one payment.",
+  23: "A batch can hold at most 20 payments.",
+};
+
+/**
+ * Turn a raw host error into something a human can act on. Soroban surfaces
+ * contract errors as `Error(Contract, #14)` buried in the message, so the code
+ * is all we get back — this maps it to the guard that actually fired.
+ */
+export function describeError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const m = raw.match(/Error\(Contract,\s*#(\d+)\)/);
+  if (m) {
+    const known = VAULT_ERRORS[Number(m[1])];
+    if (known) return known;
+    return `Contract rejected this (code ${m[1]}).`;
+  }
+  return raw;
+}
 
 /* ---------------- reads (simulate only) ---------------- */
 async function simulate(contractId: string, method: string, args: xdr.ScVal[]): Promise<any> {
@@ -118,6 +195,78 @@ export async function getProposals(vaultAddr: string, max = 16): Promise<Proposa
     }
   }
   return out;
+}
+
+/** Guard state for a proposal. Falls back gracefully on a pre-guards vault. */
+export async function getStatus(vaultAddr: string, txId: number): Promise<ProposalStatus | null> {
+  try {
+    const s = await simulate(vaultAddr, "get_status", [u64(txId)]);
+    return {
+      cancelled: s.cancelled,
+      executed: s.executed,
+      approval_count: Number(s.approval_count),
+      threshold: Number(s.threshold),
+      unlock_ledger: Number(s.unlock_ledger),
+      current_ledger: Number(s.current_ledger),
+      is_batch: s.is_batch,
+      amount: BigInt(s.amount),
+    };
+  } catch {
+    return null; // v1 vault — no get_status entry point
+  }
+}
+
+export async function getBatch(vaultAddr: string, txId: number): Promise<BatchItem[]> {
+  try {
+    const items = await simulate(vaultAddr, "get_batch", [u64(txId)]);
+    return (items ?? []).map((i: any) => ({ target: i.target, amount: BigInt(i.amount) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Contract code version: 2 = guards available, null = a vault deployed before
+ * guards existed (it has no `version` entry point) and needs `upgrade()`.
+ */
+export async function getVersion(vaultAddr: string): Promise<number | null> {
+  try {
+    return Number(await simulate(vaultAddr, "version", []));
+  } catch {
+    return null;
+  }
+}
+
+export async function getPolicy(vaultAddr: string): Promise<Policy> {
+  try {
+    const p = await simulate(vaultAddr, "get_policy", []);
+    return {
+      max_per_tx: BigInt(p.max_per_tx),
+      spending_cap: BigInt(p.spending_cap),
+      cap_window_ledgers: Number(p.cap_window_ledgers),
+      timelock_ledgers: Number(p.timelock_ledgers),
+      allowlist_only: p.allowlist_only,
+    };
+  } catch {
+    return OPEN_POLICY; // v1 vault — no guards, nothing restricted
+  }
+}
+
+export async function getAllowed(vaultAddr: string): Promise<string[]> {
+  try {
+    return (await simulate(vaultAddr, "get_allowed", [])) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Amount already spent in the vault's current cap window. */
+export async function getSpentInWindow(vaultAddr: string): Promise<bigint> {
+  try {
+    return BigInt(await simulate(vaultAddr, "spent_in_window", []));
+  } catch {
+    return 0n;
+  }
 }
 
 /** Vault addresses this owner created (factory's on-chain registry). */
@@ -241,7 +390,6 @@ function proofTo256(proof: any): Uint8Array {
 
 /** Submit a real Groth16 proof + nullifier to the instance's approve_zk (identity hidden). */
 export function approveZk(vaultAddr: string, txId: number, signer: string, proof: any, publicSignals: string[]) {
-  const entry = (k: string, v: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
   // vault-instance ZKApproval = { nullifier, proof, public_inputs } (keys sorted)
   const zkApproval = xdr.ScVal.scvMap([
     entry("nullifier", nativeToScVal(BigInt(publicSignals[3]), { type: "u256" })),
@@ -253,6 +401,42 @@ export function approveZk(vaultAddr: string, txId: number, signer: string, proof
 
 export const execute = (vaultAddr: string, txId: number, executor: string) =>
   invoke(vaultAddr, "execute", [u64(txId), addr(executor)], executor);
+
+export const cancel = (vaultAddr: string, txId: number, caller: string) =>
+  invoke(vaultAddr, "cancel", [u64(txId), addr(caller)], caller);
+
+/* ---------------- guards (owner-only writes) ---------------- */
+/** Struct fields must be emitted in symbol order, hence the alphabetical keys. */
+const policyScVal = (p: Policy) =>
+  xdr.ScVal.scvMap([
+    entry("allowlist_only", bool(p.allowlist_only)),
+    entry("cap_window_ledgers", u32(p.cap_window_ledgers)),
+    entry("max_per_tx", i128(p.max_per_tx)),
+    entry("spending_cap", i128(p.spending_cap)),
+    entry("timelock_ledgers", u32(p.timelock_ledgers)),
+  ]);
+
+const batchScVal = (items: BatchItem[]) =>
+  xdr.ScVal.scvVec(
+    items.map((it) => xdr.ScVal.scvMap([entry("amount", i128(it.amount)), entry("target", addr(it.target))]))
+  );
+
+export const setPolicy = (vaultAddr: string, owner: string, policy: Policy) =>
+  invoke(vaultAddr, "set_policy", [policyScVal(policy)], owner);
+
+export const allowRecipient = (vaultAddr: string, owner: string, target: string) =>
+  invoke(vaultAddr, "allow_recipient", [addr(target)], owner);
+
+export const revokeRecipient = (vaultAddr: string, owner: string, target: string) =>
+  invoke(vaultAddr, "revoke_recipient", [addr(target)], owner);
+
+/** Batch (multi-call): N payments approved once and executed atomically. */
+export const proposeBatch = (
+  vaultAddr: string,
+  proposer: string,
+  items: BatchItem[],
+  privateMode: boolean
+) => invoke(vaultAddr, "propose_batch", [addr(proposer), batchScVal(items), bool(privateMode)], proposer);
 
 /** Deposit = a plain token transfer to the vault's own address (Safe-style). */
 export const depositToVault = (vaultAddr: string, from: string, amountStroops: bigint) =>

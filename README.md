@@ -45,6 +45,8 @@ Stellar's native multi-sig (and the wallets built on it — LOBSTR Vault, Solar,
 - **Zero-knowledge approvals** — verifying + recording a Groth16 nullifier on approval is logic a native account simply cannot execute.
 - **Confidential execution** — moving funds through a shielded pool needs a programmable contract.
 - **A factory, one contract per vault** — each vault is its own deployed contract (own address, own native balance), Gnosis-Safe-style.
+- **Guards** — a per-tx limit, a rolling spending cap, a time-lock and a recipient allowlist, all enforced *by the vault itself*. A native account has one lever: the threshold.
+- **Batch (multi-call)** — up to 20 payments approved once and settled atomically. Native multi-sig has no notion of "these move together or not at all."
 
 The transparent products prove the **demand** for multi-sig on Stellar. We add the two things native multi-sig structurally can't: **privacy** and **programmability**.
 
@@ -62,6 +64,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
 | **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
+| **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
 | **On-chain Groth16 verify**                     | 🚧 **Roadmap**           | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step — now unblocked by the Jan-2026 "X-Ray" upgrade (BN254 + Poseidon host functions on Soroban)    |
 
 > **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
@@ -123,8 +126,8 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 19 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 7 pass  (multi-sig vault)
+# 29 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 24 pass (multi-sig vault + guards)
 cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
 cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
 
@@ -167,6 +170,28 @@ Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier i
 
 ---
 
+## Guards: programmable spending rules
+
+The threshold answers *"did enough people agree?"*. Guards answer *"is this transaction allowed at all?"* — and the vault enforces them itself, on every execution.
+
+| Guard | What it does | Rejects with |
+| --------------------- | ------------------------------------------------------------------------------ | ------------------------ |
+| **Per-tx limit**      | caps a single execution; a batch is judged on its **total**, so splitting a payment doesn't get around it | `ExceedsMaxPerTx` (#14) |
+| **Spending cap**      | a rolling budget per window (1h / 6h / 1d / 1w) — spend accrues, the window resets | `ExceedsSpendingCap` (#15) |
+| **Time-lock**         | a cooling-off period between propose and execute — the window in which co-signers can cancel | `TimelockActive` (#16)  |
+| **Recipient allowlist** | funds may only leave to approved addresses; checked at propose **and** again at execute | `RecipientNotAllowed` (#17) |
+
+Two design decisions worth calling out:
+
+- **Guards are re-checked at execute, not just at propose.** Tightening the policy — or revoking a recipient — blocks a proposal that had already collected its approvals. The alternative (trusting the propose-time check) would let a stale proposal outlive the rule that was meant to stop it.
+- **A vault with no policy set is unrestricted.** The default is fully permissive, so upgrading an existing vault never changes its behaviour until the owner opts in.
+
+Every rejection is a **typed contract error**, so the UI can say *"Time-locked · 8 min left"* instead of surfacing a raw host panic. Add **batch (multi-call)** — up to 20 payments approved once and settled atomically — and **cancellation**, which is now distinct from execution rather than sharing the `executed` flag.
+
+`vault-instance` covers all of this in **24 unit tests**, and each guard was verified live on testnet — see `deployments/testnet/addresses.txt`.
+
+---
+
 ## Demo flow (3 minutes)
 
 1. **Create a vault** — connect Freighter, pick signers + threshold, sign on-chain.
@@ -180,7 +205,7 @@ Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier i
 
 Because each vault is a programmable smart contract (not native multi-sig), it's the right foundation for Gnosis-Safe-style extensibility — things native multi-sig structurally can't add:
 
-- **Safe-style modules & guards** — spending limits, daily caps, role-based access, time-locks, transaction simulation before signing, batched multi-call transactions, session keys, social recovery.
+- **More Safe-style modules** — role-based access (proposer / approver / executor), session keys, social recovery, transaction simulation before signing. The first wave — spending limits, rolling caps, time-locks, a recipient allowlist and batched multi-call — is **already live** (see the status table).
 - **On-chain Groth16 verifier** — deploy a verifier keyed to our circuits' VK + bind the signer Merkle root in the vault (now unblocked by the X-Ray BN254/Poseidon host functions).
 - **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the on-chain event already hides it).
 - **Confidential execution inside the vault** — wire the shielded pool directly into a private `execute` so amount + recipient are hidden by default.

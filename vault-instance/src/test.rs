@@ -1,12 +1,12 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger as _},
     token::{StellarAssetClient, TokenClient},
     vec, Address, Bytes, Env, String, U256, Vec,
 };
 
-use crate::{VaultInstance, VaultInstanceClient, ZKApproval};
+use crate::{BatchItem, Error, Policy, VaultInstance, VaultInstanceClient, ZKApproval};
 
 struct Setup<'a> {
     env: Env,
@@ -16,6 +16,26 @@ struct Setup<'a> {
     token_admin: StellarAssetClient<'a>,
     owner: Address,
     signers: Vec<Address>,
+}
+
+impl Setup<'_> {
+    fn signer(&self, i: u32) -> Address {
+        self.signers.get(i).unwrap()
+    }
+    /// A permissive policy with one guard dialled in.
+    fn set_policy(&self, p: Policy) {
+        self.vault.set_policy(&p);
+    }
+}
+
+fn open_policy() -> Policy {
+    Policy {
+        max_per_tx: 0,
+        spending_cap: 0,
+        cap_window_ledgers: 0,
+        timelock_ledgers: 0,
+        allowlist_only: false,
+    }
 }
 
 fn setup(threshold: u32) -> Setup<'static> {
@@ -48,6 +68,15 @@ fn setup(threshold: u32) -> Setup<'static> {
     }
 }
 
+/// Fund the vault and approve `tx` up to the threshold.
+fn approve_to_threshold(s: &Setup, tx: u64, count: u32) {
+    for i in 0..count {
+        s.vault.approve(&tx, &s.signer(i));
+    }
+}
+
+// ---------------------------------------------------------------- v1 behaviour
+
 #[test]
 fn test_create_and_query() {
     let s = setup(2);
@@ -55,9 +84,10 @@ fn test_create_and_query() {
     assert_eq!(c.name, String::from_str(&s.env, "Team Vault"));
     assert_eq!(c.threshold, 2);
     assert_eq!(c.signer_count, 3);
-    assert!(s.vault.is_signer(&s.signers.get(1).unwrap()));
+    assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
+    assert_eq!(s.vault.version(), 2);
 }
 
 #[test]
@@ -68,10 +98,9 @@ fn test_transparent_execute_moves_own_funds() {
     assert_eq!(s.vault.get_balance(), 5_000_000);
 
     let recipient = Address::generate(&s.env);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &recipient, &1_000_000, &false);
-    s.vault.approve(&tx, &s.signers.get(0).unwrap());
-    s.vault.approve(&tx, &s.signers.get(1).unwrap());
-    s.vault.execute(&tx, &s.signers.get(0).unwrap());
+    let tx = s.vault.propose(&s.signer(0), &recipient, &1_000_000, &false);
+    approve_to_threshold(&s, tx, 2);
+    s.vault.execute(&tx, &s.signer(0));
 
     assert_eq!(s.token.balance(&recipient), 1_000_000);
     assert_eq!(s.vault.get_balance(), 4_000_000);
@@ -84,15 +113,15 @@ fn test_private_execute_moves_funds_with_zk_approval() {
     s.token_admin.mint(&s.vault_addr, &3_000_000);
 
     let recipient = Address::generate(&s.env);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &recipient, &1_000_000, &true);
+    let tx = s.vault.propose(&s.signer(0), &recipient, &1_000_000, &true);
 
     let zk = ZKApproval {
         proof: Bytes::from_array(&s.env, &[1u8; 8]),
         public_inputs: Vec::new(&s.env),
         nullifier: U256::from_u32(&s.env, 0xAB),
     };
-    s.vault.approve_zk(&tx, &s.signers.get(0).unwrap(), &zk);
-    s.vault.execute(&tx, &s.signers.get(0).unwrap());
+    s.vault.approve_zk(&tx, &s.signer(0), &zk);
+    s.vault.execute(&tx, &s.signer(0));
 
     // funds move (amount/recipient are public); only the approver identity was hidden by ZK
     assert!(s.vault.get_proposal(&tx).executed);
@@ -101,42 +130,372 @@ fn test_private_execute_moves_funds_with_zk_approval() {
 }
 
 #[test]
-#[should_panic]
-fn test_double_approve_panics() {
+fn test_double_approve_rejected() {
     let s = setup(2);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &Address::generate(&s.env), &10, &false);
-    let signer = s.signers.get(0).unwrap();
-    s.vault.approve(&tx, &signer);
-    s.vault.approve(&tx, &signer);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_approve(&tx, &s.signer(0)),
+        Err(Ok(Error::AlreadyApproved))
+    );
 }
 
 #[test]
-#[should_panic]
-fn test_non_signer_approve_panics() {
+fn test_non_signer_approve_rejected() {
     let s = setup(2);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &Address::generate(&s.env), &10, &false);
-    s.vault.approve(&tx, &Address::generate(&s.env));
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    assert_eq!(
+        s.vault.try_approve(&tx, &Address::generate(&s.env)),
+        Err(Ok(Error::NotSigner))
+    );
 }
 
 #[test]
-#[should_panic]
-fn test_execute_below_threshold_panics() {
+fn test_execute_below_threshold_rejected() {
     let s = setup(2);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &Address::generate(&s.env), &10, &false);
-    s.vault.approve(&tx, &s.signers.get(0).unwrap());
-    s.vault.execute(&tx, &s.signers.get(0).unwrap());
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ThresholdNotMet))
+    );
 }
 
 #[test]
-#[should_panic]
-fn test_zk_double_vote_panics() {
+fn test_zk_double_vote_rejected() {
     let s = setup(2);
-    let tx = s.vault.propose(&s.signers.get(0).unwrap(), &Address::generate(&s.env), &10, &true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
     let mk = |n: u32| ZKApproval {
         proof: Bytes::from_array(&s.env, &[n as u8; 8]),
         public_inputs: Vec::new(&s.env),
         nullifier: U256::from_u32(&s.env, 0x99),
     };
-    s.vault.approve_zk(&tx, &s.signers.get(0).unwrap(), &mk(1));
-    s.vault.approve_zk(&tx, &s.signers.get(1).unwrap(), &mk(2)); // same nullifier -> panic
+    s.vault.approve_zk(&tx, &s.signer(0), &mk(1));
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(1), &mk(2)), // same nullifier
+        Err(Ok(Error::NullifierUsed))
+    );
+}
+
+// ------------------------------------------------------------ proposal hygiene
+
+#[test]
+fn test_propose_by_non_signer_rejected() {
+    let s = setup(2);
+    let outsider = Address::generate(&s.env);
+    assert_eq!(
+        s.vault.try_propose(&outsider, &Address::generate(&s.env), &10, &false),
+        Err(Ok(Error::NotSigner))
+    );
+}
+
+#[test]
+fn test_propose_non_positive_amount_rejected() {
+    let s = setup(2);
+    let target = Address::generate(&s.env);
+    assert_eq!(
+        s.vault.try_propose(&s.signer(0), &target, &0, &false),
+        Err(Ok(Error::InvalidAmount))
+    );
+    assert_eq!(
+        s.vault.try_propose(&s.signer(0), &target, &-5, &false),
+        Err(Ok(Error::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_insufficient_balance_rejected() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &100);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &500, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::InsufficientBalance))
+    );
+}
+
+// ------------------------------------------------------------------ cancelling
+
+#[test]
+fn test_cancel_marks_cancelled_not_executed() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(1), &Address::generate(&s.env), &10, &false);
+    s.vault.cancel(&tx, &s.signer(1));
+
+    // v1 conflated the two; a cancelled proposal must not read back as executed
+    assert!(s.vault.is_cancelled(&tx));
+    assert!(!s.vault.get_proposal(&tx).executed);
+    let st = s.vault.get_status(&tx);
+    assert!(st.cancelled && !st.executed);
+
+    assert_eq!(s.vault.try_approve(&tx, &s.signer(0)), Err(Ok(Error::AlreadyCancelled)));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::AlreadyCancelled)));
+}
+
+#[test]
+fn test_owner_can_cancel_others_proposal_but_stranger_cannot() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(1), &Address::generate(&s.env), &10, &false);
+    assert_eq!(
+        s.vault.try_cancel(&tx, &s.signer(2)),
+        Err(Ok(Error::NotProposer))
+    );
+    s.vault.cancel(&tx, &s.owner);
+    assert!(s.vault.is_cancelled(&tx));
+}
+
+// --------------------------------------------------------------- guard: limit
+
+#[test]
+fn test_max_per_tx_blocks_propose() {
+    let s = setup(2);
+    s.set_policy(Policy { max_per_tx: 1_000, ..open_policy() });
+    assert_eq!(s.vault.get_policy().max_per_tx, 1_000);
+
+    let target = Address::generate(&s.env);
+    assert_eq!(
+        s.vault.try_propose(&s.signer(0), &target, &1_001, &false),
+        Err(Ok(Error::ExceedsMaxPerTx))
+    );
+    // exactly at the limit is allowed
+    s.vault.propose(&s.signer(0), &target, &1_000, &false);
+}
+
+#[test]
+fn test_policy_tightened_after_propose_blocks_execute() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &5_000, &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    // owner tightens the policy while the proposal was collecting approvals
+    s.set_policy(Policy { max_per_tx: 1_000, ..open_policy() });
+
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ExceedsMaxPerTx))
+    );
+}
+
+// ------------------------------------------------------------ guard: time-lock
+
+#[test]
+fn test_timelock_blocks_then_allows() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
+
+    s.env.ledger().set_sequence_number(100);
+    let recipient = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &recipient, &1_000, &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    let st = s.vault.get_status(&tx);
+    assert_eq!(st.unlock_ledger, 110);
+
+    s.env.ledger().set_sequence_number(109);
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::TimelockActive))
+    );
+
+    s.env.ledger().set_sequence_number(110);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&recipient), 1_000);
+}
+
+// ----------------------------------------------------------- guard: spend cap
+
+#[test]
+fn test_spending_cap_within_and_across_windows() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &100_000);
+    s.set_policy(Policy { spending_cap: 1_500, cap_window_ledgers: 100, ..open_policy() });
+
+    s.env.ledger().set_sequence_number(150); // window 1
+    let recipient = Address::generate(&s.env);
+
+    let spend = |amount: i128| {
+        let tx = s.vault.propose(&s.signer(0), &recipient, &amount, &false);
+        s.vault.approve(&tx, &s.signer(0));
+        s.vault.try_execute(&tx, &s.signer(0))
+    };
+
+    assert!(spend(1_000).is_ok());
+    assert_eq!(s.vault.spent_in_window(), 1_000);
+
+    // 1000 + 600 > 1500 cap
+    assert_eq!(spend(600), Err(Ok(Error::ExceedsSpendingCap)));
+    assert_eq!(s.vault.spent_in_window(), 1_000, "a rejected spend must not be booked");
+
+    // the remainder still fits
+    assert!(spend(500).is_ok());
+    assert_eq!(s.vault.spent_in_window(), 1_500);
+
+    // next window resets the budget
+    s.env.ledger().set_sequence_number(250); // window 2
+    assert_eq!(s.vault.spent_in_window(), 0);
+    assert!(spend(1_500).is_ok());
+    assert_eq!(s.token.balance(&recipient), 3_000);
+}
+
+// ----------------------------------------------------------- guard: allowlist
+
+#[test]
+fn test_allowlist_only_restricts_recipients() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    let good = Address::generate(&s.env);
+    let bad = Address::generate(&s.env);
+
+    s.vault.allow_recipient(&good);
+    s.vault.allow_recipient(&good); // idempotent
+    assert_eq!(s.vault.get_allowed().len(), 1);
+    s.set_policy(Policy { allowlist_only: true, ..open_policy() });
+
+    assert_eq!(
+        s.vault.try_propose(&s.signer(0), &bad, &100, &false),
+        Err(Ok(Error::RecipientNotAllowed))
+    );
+
+    let tx = s.vault.propose(&s.signer(0), &good, &100, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&good), 100);
+}
+
+#[test]
+fn test_revoking_a_recipient_blocks_a_pending_proposal() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    let target = Address::generate(&s.env);
+    s.vault.allow_recipient(&target);
+    s.set_policy(Policy { allowlist_only: true, ..open_policy() });
+
+    let tx = s.vault.propose(&s.signer(0), &target, &100, &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    s.vault.revoke_recipient(&target);
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::RecipientNotAllowed))
+    );
+}
+
+// ---------------------------------------------------------------------- batch
+
+#[test]
+fn test_batch_executes_every_item_atomically() {
+    let s = setup(2);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+
+    let a = Address::generate(&s.env);
+    let b = Address::generate(&s.env);
+    let items = vec![
+        &s.env,
+        BatchItem { target: a.clone(), amount: 300 },
+        BatchItem { target: b.clone(), amount: 700 },
+    ];
+
+    let tx = s.vault.propose_batch(&s.signer(0), &items, &false);
+    let st = s.vault.get_status(&tx);
+    assert!(st.is_batch);
+    assert_eq!(st.amount, 1_000, "umbrella proposal carries the batch total");
+    assert_eq!(s.vault.get_batch(&tx).len(), 2);
+
+    approve_to_threshold(&s, tx, 2);
+    s.vault.execute(&tx, &s.signer(0));
+
+    assert_eq!(s.token.balance(&a), 300);
+    assert_eq!(s.token.balance(&b), 700);
+    assert_eq!(s.vault.get_balance(), 9_000);
+}
+
+#[test]
+fn test_batch_total_cannot_bypass_max_per_tx() {
+    let s = setup(1);
+    s.set_policy(Policy { max_per_tx: 1_000, ..open_policy() });
+
+    // each item is under the limit, the total is not
+    let items = vec![
+        &s.env,
+        BatchItem { target: Address::generate(&s.env), amount: 600 },
+        BatchItem { target: Address::generate(&s.env), amount: 600 },
+    ];
+    assert_eq!(
+        s.vault.try_propose_batch(&s.signer(0), &items, &false),
+        Err(Ok(Error::ExceedsMaxPerTx))
+    );
+}
+
+#[test]
+fn test_batch_respects_allowlist_and_rejects_empty() {
+    let s = setup(1);
+    let allowed = Address::generate(&s.env);
+    s.vault.allow_recipient(&allowed);
+    s.set_policy(Policy { allowlist_only: true, ..open_policy() });
+
+    let mixed = vec![
+        &s.env,
+        BatchItem { target: allowed, amount: 10 },
+        BatchItem { target: Address::generate(&s.env), amount: 10 },
+    ];
+    assert_eq!(
+        s.vault.try_propose_batch(&s.signer(0), &mixed, &false),
+        Err(Ok(Error::RecipientNotAllowed))
+    );
+
+    assert_eq!(
+        s.vault.try_propose_batch(&s.signer(0), &Vec::new(&s.env), &false),
+        Err(Ok(Error::EmptyBatch))
+    );
+}
+
+// ------------------------------------------------------------ signer mgmt
+
+#[test]
+fn test_duplicate_and_unknown_signer_rejected() {
+    let s = setup(2);
+    assert_eq!(
+        s.vault.try_add_signer(&s.signer(1)),
+        Err(Ok(Error::DuplicateSigner))
+    );
+    assert_eq!(
+        s.vault.try_remove_signer(&Address::generate(&s.env)),
+        Err(Ok(Error::SignerNotFound))
+    );
+    // removing down to below the threshold is refused
+    s.vault.remove_signer(&s.signer(2));
+    assert_eq!(
+        s.vault.try_remove_signer(&s.signer(1)),
+        Err(Ok(Error::BadThreshold))
+    );
+}
+
+// ----------------------------------------------------------- default policy
+
+#[test]
+fn test_unset_policy_is_fully_permissive() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    let p = s.vault.get_policy();
+    assert_eq!(p, open_policy());
+
+    // a vault that never sets a policy behaves exactly like v1
+    let recipient = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &recipient, &9_999, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&recipient), 9_999);
+    assert_eq!(s.vault.spent_in_window(), 0, "no cap set => nothing is booked");
+}
+
+#[test]
+fn test_negative_policy_rejected() {
+    let s = setup(1);
+    assert_eq!(
+        s.vault.try_set_policy(&Policy { max_per_tx: -1, ..open_policy() }),
+        Err(Ok(Error::InvalidPolicy))
+    );
 }

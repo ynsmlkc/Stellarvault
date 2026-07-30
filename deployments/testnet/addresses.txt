@@ -1,43 +1,74 @@
 # Stellar Vault — Testnet Deployment
 
-Date: 2026-06-25
 Network: Testnet
 Deployer Account: GAEAII4H4RJOMCMJTVKUH5ZEJVAVT5CRFSRMMUZPNJG6BCYL7X2BOBUH
 Deployer Alias: deployer
 
 ---
 
-## Nethermind Infrastructure
+## Live contracts
+
+FACTORY_ID        = CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J
+SHIELD_POOL_ID    = CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA
+TOKEN (XLM SAC)   = CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+
+The factory deploys one `vault-instance` contract per vault (Safe-style), so a
+vault's address is minted at create time — there is no single "vault contract"
+to list here. `factory.get_vaults(owner)` is the on-chain registry.
+
+### vault-instance WASM
+
+v2 (guards)  = c2428442e3d668f301a7b1ce5fb40eac884ddd448d6df9a5c1cce2ebbaf45c9b
+               uploaded 2026-07-30; factory.set_wasm applied the same day
+
+v2 adds the owner-configurable Policy (per-tx limit, rolling spending cap,
+time-lock, recipient allowlist), batch/multi-call proposals, typed contract
+errors, proposal cancellation and an owner-gated `upgrade`.
+
+NOTE: `set_wasm` only affects vaults created AFTER it. Vaults deployed on v1
+have no `upgrade` entry point and therefore stay on v1 permanently — the
+frontend detects this (no `version()`) and renders them without guards.
+
+---
+
+## Guard verification on testnet (2026-07-30)
+
+Test vault: CBXBETIKTOZZKVXEKDSIBTDCSFEVAHOICCDIZSS7YXV7MWGY5J7625SN
+
+- per-tx limit .... 20 XLM against a 10 XLM limit -> Error(Contract, #14); 5 XLM passed
+- time-lock ...... unlock_ledger = created_at + 100 -> Error(Contract, #16) until reached
+- cancel ......... is_cancelled = true; a later execute -> Error(Contract, #7)
+- allowlist ...... non-allowlisted recipient -> Error(Contract, #17)
+- batch .......... one approval moved 2 transfers atomically (3 XLM total)
+- spending cap ... 1.5/2 XLM booked; the next execute -> Error(Contract, #15),
+                   and the rejected spend was NOT booked against the window
+- upgrade ........ owner-gated update_current_contract_wasm succeeded
+
+First vault created through the upgraded factory:
+CDGRR6KT5PVDVNCLGW7TFSFSFQ7XR7Y5WPFDRRMTKDB7PG3CRP2NDEAC  (version() = 2)
+
+---
+
+## Explored, not used
+
+The Nethermind private-payments infrastructure below was evaluated in Faz 4; we
+built our own shielded pool instead. Kept for reference only.
 
 VERIFIER_ID   = CDRMXX3O74B7S6UV47A6JRSUUUGQ6OYWG2NYDHJKZY4PTULZN7GAKL6V
 ASP_MEM_ID    = CA4N4LFE6EMPPHORRLJJGP3UDV2ENDFIWI3ZBA4GY6LFYJOB7GSEGJBD
 ASP_NONMEM_ID = CBWCSODWHCUFTO5SSHFGECRY4Z7SQCY5EFPOE375SUXNTEKWWUUP6UOM
 POOL_ID       = CCQRXA6UMVSPKRZDYGVS2G3E67INXML7EX5NZVFGC66E3FLJEGA5VTHY
-TOKEN (XLM)   = CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+
+## Superseded
+
+Single-contract design, pre-factory:
+CAUYRN2Q6TPONJLNU6Z6YQC564UNFSEYSYPVWZBLIVHEBYLBOHMLTYM7
+Earlier iterations CDSIBLZ3… and CBBBYFMR… were abandoned when the factory landed.
 
 ---
 
-## Vault Contract
+## Explorer
 
-VAULT_ID      = CDSIBLZ3LQ5CEXKPWQNE5IWAMVNDYAYNMSLB4ECXTRQAQYLEZWF42YKM
-VAULT_ID_OLD  = CBBBYFMRP2KX3FDYBQZTVVOIUKUS53RQW6SYYMXOTVAGKKOUTMGXURRK  (pool/token karisikligi vardi, terk edildi)
-
-Token slotu (transparent transfer): ✅  XLM SAC (CDLZFC3S...)
-Pool adresi (confidential, Faz 4): henuz set edilmedi
-
-### Faz 1 dogrulamasi (2026-06-26) — transparent akis testnet'te calisiyor ✅
-- create_vault(deployer, [deployer,signer1,signer2], threshold=2) -> vault_id 0
-- set_token = XLM SAC, vault'a 100 XLM yuklendi
-- propose(10 XLM -> testnet-account) -> approve(deployer) -> approve(signer1) -> execute
-- Sonuc: Vault 100->90 XLM, alici +10 XLM, executed=true, TransactionExecutedEvent yayildi
-
----
-
-## Explorer Links
-
-- Verifier: https://stellar.expert/explorer/testnet/contract/CDRMXX3O74B7S6UV47A6JRSUUUGQ6OYWG2NYDHJKZY4PTULZN7GAKL6V
-- ASP Membership: https://stellar.expert/explorer/testnet/contract/CA4N4LFE6EMPPHORRLJJGP3UDV2ENDFIWI3ZBA4GY6LFYJOB7GSEGJBD
-- ASP Non-Membership: https://stellar.expert/explorer/testnet/contract/CBWCSODWHCUFTO5SSHFGECRY4Z7SQCY5EFPOE375SUXNTEKWWUUP6UOM
-- Pool: https://stellar.expert/explorer/testnet/contract/CCQRXA6UMVSPKRZDYGVS2G3E67INXML7EX5NZVFGC66E3FLJEGA5VTHY
+- Factory:     https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J
+- Shield Pool: https://stellar.expert/explorer/testnet/contract/CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA
 - Token (XLM): https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
-- Vault: https://stellar.expert/explorer/testnet/contract/CBBBYFMRP2KX3FDYBQZTVVOIUKUS53RQW6SYYMXOTVAGKKOUTMGXURRK

@@ -17,12 +17,26 @@ import {
   getMyVaults,
   createVault as createVaultTx,
   proposeTransaction,
+  proposeBatch,
   approve as approveTx,
   approveZk,
   execute as executeTx,
+  cancel as cancelTx,
   depositToVault,
+  getPolicy,
+  getAllowed,
+  getSpentInWindow,
+  getStatus,
+  setPolicy as setPolicyTx,
+  allowRecipient,
+  revokeRecipient,
+  describeError,
+  OPEN_POLICY,
   type VaultConfig,
   type Proposal,
+  type Policy,
+  type ProposalStatus,
+  type BatchItem,
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, H } from "@/lib/prover";
 import Shield from "./shield";
@@ -47,7 +61,7 @@ const markApproved = (v: string, t: number, w: string) => {
   } catch {}
 };
 
-type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield";
+type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield" | "guards";
 type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
@@ -109,18 +123,39 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // guards — the vault's policy plus the per-proposal state it produces
+  const [policy, setPolicy] = useState<Policy>(OPEN_POLICY);
+  const [allowed, setAllowed] = useState<string[]>([]);
+  const [spent, setSpent] = useState<bigint>(0n);
+  const [statuses, setStatuses] = useState<Record<number, ProposalStatus>>({});
+
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p] = await Promise.all([
+      const [c, b, p, pol, allow, sp] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
+        getPolicy(addr),
+        getAllowed(addr),
+        getSpentInWindow(addr),
       ]);
       setConfig(c);
       setBalance(b);
       setProposals(p);
+      setPolicy(pol);
+      setAllowed(allow);
+      setSpent(sp);
+
+      // guard state per proposal (time-lock, cancellation) — a pre-guards vault
+      // returns null for every one of these and the UI simply falls back
+      const st = await Promise.all(p.map((x) => getStatus(addr, x.id)));
+      const map: Record<number, ProposalStatus> = {};
+      p.forEach((x, i) => {
+        if (st[i]) map[x.id] = st[i]!;
+      });
+      setStatuses(map);
     } catch (e) {
       // leave nulls; UI falls back to skeleton/empty
     } finally {
@@ -345,16 +380,88 @@ export default function Page() {
     }
   };
 
-  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield";
+  const doCancel = async (txId: number) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy(`cancel-${txId}`);
+    try {
+      await cancelTx(vaultAddress, txId, w);
+      refreshSoon();
+      showToast({ title: "Proposal cancelled", sub: `#${txId} can no longer be approved or executed.`, tone: "ok" });
+    } catch (e: any) {
+      showToast({ title: "Cancel failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Batch (multi-call): N payments approved once, executed atomically.
+  const submitBatch = async (items: BatchItem[]) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy("propose");
+    try {
+      await proposeBatch(vaultAddress, w, items, mode === "private");
+      await loadData();
+      go("vault");
+      showToast({
+        title: `Batch of ${items.length} proposed`,
+        sub: "One approval round — all payments settle together or not at all.",
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Batch propose failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doSavePolicy = async (next: Policy) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy("policy");
+    try {
+      await setPolicyTx(vaultAddress, w, next);
+      refreshSoon();
+      showToast({ title: "Guards updated", sub: "Enforced on-chain from the next execution onward.", tone: "ok" });
+    } catch (e: any) {
+      showToast({ title: "Couldn't update guards", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doAllowRecipient = async (target: string, allow: boolean) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy(`allow-${target}`);
+    try {
+      await (allow ? allowRecipient : revokeRecipient)(vaultAddress, w, target);
+      refreshSoon();
+      showToast({
+        title: allow ? "Recipient allowed" : "Recipient revoked",
+        sub: allow ? "Funds may now go to this address." : "Pending proposals to this address can no longer execute.",
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Allowlist update failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards";
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
       {screen === "landing" && <Landing onConnect={() => go("connect")} onVault={() => go("connect")} balance={balance} />}
       {screen === "connect" && <Connect onBack={() => go("landing")} onConnect={handleConnect} connecting={connecting} />}
       {isApp && (
-        <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} wallet={wallet}
+        <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} wallet={wallet}
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()} />
+          policy={policy} allowed={allowed} spent={spent} statuses={statuses}
+          onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
+          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -365,10 +472,42 @@ export default function Page() {
 function cleanErr(e: any): string {
   // surface the full error in the browser console for debugging
   if (typeof console !== "undefined") console.error("[StellarVault] action failed:", e);
-  const m = (e?.message || String(e)).replace(/^Error:\s*/, "");
+  // a typed contract error tells us exactly which guard fired — prefer it
+  const described = describeError(e);
+  const m = described.replace(/^Error:\s*/, "");
+  if (described !== (e?.message ?? String(e))) return m;
   if (/getAccount|not found|404/i.test(m)) return "Account not funded on testnet, or not a vault signer.";
   if (/Transaction failed/i.test(m)) return "Rejected on-chain — you may not be a signer for this vault.";
   return m.length > 90 ? m.slice(0, 90) + "…" : m;
+}
+
+/* ---------------- guard formatting ---------------- */
+const LEDGER_SECONDS = 5;
+/** Ledgers → a human duration. The chain's unit is ledgers; people think in time. */
+function ledgersToHuman(n: number): string {
+  if (n <= 0) return "none";
+  const secs = n * LEDGER_SECONDS;
+  if (secs < 90) return `${secs}s`;
+  if (secs < 5400) return `${Math.round(secs / 60)} min`;
+  if (secs < 172800) return `${(secs / 3600).toFixed(secs < 36000 ? 1 : 0)} h`;
+  return `${(secs / 86400).toFixed(1)} days`;
+}
+const xlmFromStroops = (v: bigint) => Number(v) / 1e7;
+const stroopsFromXlm = (s: string): bigint => {
+  const n = Number(String(s).replace(/,/g, "").trim());
+  if (!isFinite(n) || n < 0) throw new Error("Enter a valid amount");
+  return BigInt(Math.round(n * 1e7));
+};
+
+/** Why "Execute" is unavailable right now, or null when it's clear to go. */
+function executeBlocker(p: Proposal, st: ProposalStatus | undefined, policy: Policy, balance: bigint | null): string | null {
+  if (st?.cancelled) return "Cancelled";
+  if (st && st.current_ledger < st.unlock_ledger) {
+    return `Time-locked · ${ledgersToHuman(st.unlock_ledger - st.current_ledger)} left`;
+  }
+  if (policy.max_per_tx > 0n && p.amount > policy.max_per_tx) return "Over the per-transaction limit";
+  if (balance != null && balance < p.amount) return "Vault balance too low";
+  return null;
 }
 
 /* ============================ LANDING ============================ */
@@ -585,9 +724,11 @@ function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConn
 /* ============================ APP SHELL ============================ */
 type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
-  submitPropose: (target: string, amount: string) => void; wallet: string | null; vaultAddress: string;
+  submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>;
+  onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
+  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -604,7 +745,7 @@ function AppShell(p: ShellProps) {
           <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
             {navBtn("🔒 Confidential", p.screen === "shield", () => p.go("shield"))}
-            {navBtn("Settings", false)}
+            {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -622,8 +763,9 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
-        {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} busy={p.busy} balance={p.balance} />}
+        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
     </div>
@@ -820,14 +962,17 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, onApprove, onApproveZk, onExecute, onDeposit, onRefresh }: {
+function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>;
+  onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
   const signers = config?.signers ?? [];
-  const pending = proposals.filter((p) => !p.executed);
-  const history = proposals.filter((p) => p.executed);
+  // a cancelled proposal is neither pending nor a settled payment — it belongs in history
+  const isDone = (p: Proposal) => p.executed || !!statuses[p.id]?.cancelled;
+  const pending = proposals.filter((p) => !isDone(p));
+  const history = proposals.filter(isDone);
   const [tab, setTab] = useState<"pending" | "history">("pending");
   const list = tab === "pending" ? pending : history;
 
@@ -888,11 +1033,19 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {loading && !proposals.length && <Skeleton />}
             {!loading && !list.length && <Empty label={tab === "pending" ? "No pending transactions. Propose one." : "No history yet."} />}
-            {list.map((p) =>
-              p.private_mode
-                ? <PrivateTx key={p.id} p={p} threshold={threshold} busy={busy} iApproved={didApprove(vaultAddress, p.id, wallet)} onApproveZk={onApproveZk} onExecute={onExecute} />
-                : <TransparentTx key={p.id} p={p} threshold={threshold} busy={busy} iApproved={didApprove(vaultAddress, p.id, wallet)} onApprove={onApprove} onExecute={onExecute} />
-            )}
+            {list.map((p) => {
+              const shared = {
+                p, threshold, busy,
+                st: statuses[p.id],
+                blocker: executeBlocker(p, statuses[p.id], policy, balance),
+                canCancel: !!wallet && (wallet === p.proposer || wallet === config?.owner),
+                onCancel,
+                iApproved: didApprove(vaultAddress, p.id, wallet),
+              };
+              return p.private_mode
+                ? <PrivateTx key={p.id} {...shared} onApproveZk={onApproveZk} onExecute={onExecute} />
+                : <TransparentTx key={p.id} {...shared} onApprove={onApprove} onExecute={onExecute} />;
+            })}
           </div>
         </div>
 
@@ -905,10 +1058,32 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
             <button className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 9, width: "100%", borderRadius: 9, cursor: "pointer", marginTop: 6 }}>+ Add signer</button>
           </div>
           <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 16 }}>Policy</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Guards</span>
+              <button onClick={() => go("guards")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12, cursor: "pointer", padding: 0 }}>Edit →</button>
+            </div>
             <PolicyRow label="Threshold" value={`${threshold} of ${config?.signer_count ?? signers.length}`} />
-            <PolicyRow label="Token" value="XLM (SAC)" />
-            <PolicyRow label="ZK mode" valueNode={<span style={{ color: "#C9A86A" }}>Enabled · Groth16</span>} />
+            <PolicyRow
+              label="Per-tx limit"
+              valueNode={<GuardValue on={policy.max_per_tx > 0n} text={policy.max_per_tx > 0n ? `${formatXLM(policy.max_per_tx)} XLM` : "Unlimited"} />}
+            />
+            <PolicyRow
+              label="Spending cap"
+              valueNode={<GuardValue on={policy.spending_cap > 0n} text={policy.spending_cap > 0n ? `${formatXLM(policy.spending_cap)} / ${ledgersToHuman(policy.cap_window_ledgers || 17280)}` : "Unlimited"} />}
+            />
+            <PolicyRow
+              label="Time-lock"
+              valueNode={<GuardValue on={policy.timelock_ledgers > 0} text={policy.timelock_ledgers > 0 ? ledgersToHuman(policy.timelock_ledgers) : "None"} />}
+            />
+            <PolicyRow
+              label="Allowlist"
+              valueNode={<GuardValue on={policy.allowlist_only} text={policy.allowlist_only ? `${allowed.length} allowed` : "Off · any recipient"} />}
+            />
+            {policy.spending_cap > 0n && <CapMeter spent={spent} cap={policy.spending_cap} />}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(236,231,221,0.05)" }}>
+              <PolicyRow label="Token" value="XLM (SAC)" />
+              <PolicyRow label="ZK mode" valueNode={<span style={{ color: "#C9A86A" }}>Enabled · Groth16</span>} />
+            </div>
           </div>
         </div>
       </div>
@@ -945,6 +1120,45 @@ function PolicyRow({ label, value, valueNode }: { label: string; value?: string;
   );
 }
 
+/** An active guard reads gold; an inactive one stays quiet. */
+function GuardValue({ on, text }: { on: boolean; text: string }) {
+  return <span style={{ color: on ? "#C9A86A" : "#5a564d", fontFamily: on ? MONO : SANS, fontSize: on ? 12 : 13 }}>{text}</span>;
+}
+
+/** How much of the current spending window is already used. */
+function CapMeter({ spent, cap }: { spent: bigint; cap: bigint }) {
+  const pct = cap > 0n ? Math.min(100, (xlmFromStroops(spent) / xlmFromStroops(cap)) * 100) : 0;
+  const hot = pct >= 80;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 10.5, color: "#8A857B", marginBottom: 6 }}>
+        <span>THIS WINDOW</span>
+        <span style={{ color: hot ? "#C45D4A" : "#8A857B" }}>{formatXLM(spent)} / {formatXLM(cap)}</span>
+      </div>
+      <div style={{ height: 5, borderRadius: 3, background: "rgba(236,231,221,0.07)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: hot ? "#C45D4A" : "#C9A86A", transition: "width .4s ease" }} />
+      </div>
+    </div>
+  );
+}
+
+/** Shown on a card whose execution a guard is currently blocking. */
+function BlockedNote({ reason }: { reason: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "#C45D4A", fontFamily: MONO, border: "1px solid rgba(196,93,74,0.32)", borderRadius: 7, padding: "6px 10px" }}>
+      ⏻ {reason}
+    </span>
+  );
+}
+
+function CancelButton({ id, busy, onCancel }: { id: number; busy: string | null; onCancel: (id: number) => void }) {
+  return (
+    <button onClick={() => onCancel(id)} disabled={!!busy} className="h-navtext" style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
+      {busy === `cancel-${id}` ? "Cancelling…" : "Cancel"}
+    </button>
+  );
+}
+
 function ApprovalDots({ count, threshold, gold }: { count: number; threshold: number; gold?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -956,61 +1170,86 @@ function ApprovalDots({ count, threshold, gold }: { count: number; threshold: nu
   );
 }
 
-function TransparentTx({ p, threshold, busy, iApproved, onApprove, onExecute }: { p: Proposal; threshold: number; busy: string | null; iApproved: boolean; onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+type TxCardProps = {
+  p: Proposal; threshold: number; busy: string | null; iApproved: boolean;
+  st?: ProposalStatus; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
+};
+
+function TransparentTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
+  const cancelled = !!st?.cancelled;
+  const closed = p.executed || cancelled;
   return (
-    <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: p.executed ? 0.78 : 1 }}>
+    <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#C9A86A" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{st?.is_batch && <BatchBadge />}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>proposal #{p.id}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.target)}</div></div>
-        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Amount</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
+        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
         {p.executed
           ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
-          : <ApprovalDots count={p.approval_count} threshold={threshold} gold />}
-        {!p.executed && (
-          ready
-            ? <button onClick={() => onExecute(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
-            : iApproved
-              ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
-              : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : "Approve"}</button>
+          : cancelled
+            ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
+            : <ApprovalDots count={p.approval_count} threshold={threshold} gold />}
+        {!closed && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {ready && blocker && <BlockedNote reason={blocker} />}
+            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} />}
+            {ready
+              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-goldbtn" title={blocker ?? undefined} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: busy || blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
+              : iApproved
+                ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
+                : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : "Approve"}</button>}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function PrivateTx({ p, threshold, busy, iApproved, onApproveZk, onExecute }: { p: Proposal; threshold: number; busy: string | null; iApproved: boolean; onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function BatchBadge() {
+  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
+}
+
+function PrivateTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
+  const cancelled = !!st?.cancelled;
+  const closed = p.executed || cancelled;
   return (
-    <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: p.executed ? 0.8 : 1 }}>
+    <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: closed ? 0.8 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
       <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK{st?.is_batch && <BatchBadge />}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.target)}</div></div>
-        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Amount</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
+        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
       </div>
-      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
-          ? <span style={{ fontSize: 12, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 amount &amp; recipient hidden on-chain</span>
-          : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count}/{threshold} — voter identities hidden</span>}
-        {!p.executed && (
-          ready
-            ? <button onClick={() => onExecute(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
-            : iApproved
-              ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>✓ You approved · waiting</span>
-              : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>
+          ? <span style={{ fontSize: 12, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 executed · the chain never learned who approved</span>
+          : cancelled
+            ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
+            : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count}/{threshold} — voter identities hidden</span>}
+        {!closed && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {ready && blocker && <BlockedNote reason={blocker} />}
+            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} />}
+            {ready
+              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-ghost" title={blocker ?? undefined} style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
+              : iApproved
+                ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>✓ You approved · waiting</span>
+                : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>}
+          </div>
         )}
       </div>
     </div>
@@ -1018,10 +1257,49 @@ function PrivateTx({ p, threshold, busy, iApproved, onApproveZk, onExecute }: { 
 }
 
 /* ============================ PROPOSE ============================ */
-function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void; submitPropose: (target: string, amount: string) => void; busy: string | null; balance: bigint | null }) {
+function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance, policy, allowed, spent }: {
+  go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
+  submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void;
+  busy: string | null; balance: bigint | null; policy: Policy; allowed: string[]; spent: bigint;
+}) {
   const isPrivate = mode === "private";
   const [target, setTarget] = useState("");
   const [amount, setAmount] = useState("");
+  const [batchMode, setBatchMode] = useState(false);
+  const [rows, setRows] = useState<{ target: string; amount: string }[]>([{ target: "", amount: "" }]);
+
+  const validAddr = (a: string) => /^[GC][A-Z2-7]{55}$/.test(a.trim());
+  const rowAmount = (s: string) => {
+    const n = Number(String(s).replace(/,/g, "").trim());
+    return isFinite(n) && n > 0 ? n : 0;
+  };
+  const batchTotalXlm = rows.reduce((s, r) => s + rowAmount(r.amount), 0);
+  const totalXlm = batchMode ? batchTotalXlm : rowAmount(amount);
+  const recipients = batchMode ? rows.map((r) => r.target.trim()).filter(Boolean) : [target.trim()].filter(Boolean);
+
+  // the same guards the contract will enforce, surfaced before the wallet prompt
+  const guardWarnings: string[] = [];
+  if (policy.max_per_tx > 0n && totalXlm > xlmFromStroops(policy.max_per_tx)) {
+    guardWarnings.push(`Over the per-transaction limit of ${formatXLM(policy.max_per_tx)} XLM.`);
+  }
+  if (policy.spending_cap > 0n && totalXlm > xlmFromStroops(policy.spending_cap - spent)) {
+    guardWarnings.push(`Only ${formatXLM(policy.spending_cap - spent)} XLM left in this spending window.`);
+  }
+  if (policy.allowlist_only) {
+    const blocked = recipients.filter((r) => validAddr(r) && !allowed.includes(r));
+    if (blocked.length) guardWarnings.push(`${blocked.length === 1 ? "Recipient is" : `${blocked.length} recipients are`} not on the allowlist.`);
+  }
+  const timelockNote = policy.timelock_ledgers > 0 ? `Executable ${ledgersToHuman(policy.timelock_ledgers)} after proposing (time-lock).` : null;
+
+  const batchReady = rows.length > 0 && rows.every((r) => validAddr(r.target) && rowAmount(r.amount) > 0);
+  const setRowAt = (i: number, patch: Partial<{ target: string; amount: string }>) =>
+    setRows((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
+  const submit = () => {
+    if (!batchMode) return submitPropose(target, amount);
+    submitBatch(rows.map((r) => ({ target: r.target.trim(), amount: stroopsFromXlm(r.amount) })));
+  };
+
   return (
     <div>
       <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 18, padding: 0 }}>← Orbital Treasury</button>
@@ -1042,17 +1320,59 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start" }}>
         <div style={{ border: `1px solid ${isPrivate ? "rgba(236,231,221,0.1)" : "rgba(201,168,106,0.24)"}`, borderRadius: 15, background: isPrivate ? "#0d0d0d" : "linear-gradient(180deg,#15140f,#111110)", padding: 28, transition: "border-color .3s,background .3s" }}>
-          <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Recipient address</label>
-          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="G…" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
-          <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Amount</label>
-          <div style={{ display: "flex", alignItems: "center", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "0 15px", marginBottom: 22 }}>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, background: "transparent", border: "none", padding: "14px 0", color: "#ECE7DD", fontFamily: DISPLAY, fontSize: 22 }} />
-            <span style={{ fontFamily: MONO, fontSize: 13, color: "#8A857B", borderLeft: "1px solid rgba(236,231,221,0.1)", paddingLeft: 14 }}>XLM</span>
+          <div style={{ display: "flex", gap: 6, marginBottom: 22 }}>
+            {([["Single payment", false], ["Batch · multi-call", true]] as const).map(([label, v]) => (
+              <button key={label} onClick={() => setBatchMode(v)} style={{ flex: 1, background: batchMode === v ? "rgba(201,168,106,0.12)" : "transparent", border: `1px solid ${batchMode === v ? "rgba(201,168,106,0.45)" : "rgba(236,231,221,0.10)"}`, color: batchMode === v ? "#C9A86A" : "#8A857B", borderRadius: 9, padding: "10px 12px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+            ))}
           </div>
+
+          {!batchMode ? (
+            <>
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Recipient address</label>
+              <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="G…" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Amount</label>
+              <div style={{ display: "flex", alignItems: "center", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "0 15px", marginBottom: 22 }}>
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, background: "transparent", border: "none", padding: "14px 0", color: "#ECE7DD", fontFamily: DISPLAY, fontSize: 22 }} />
+                <span style={{ fontFamily: MONO, fontSize: 13, color: "#8A857B", borderLeft: "1px solid rgba(236,231,221,0.1)", paddingLeft: 14 }}>XLM</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Payments</label>
+              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 14, lineHeight: 1.5 }}>One approval round for all of them — they settle together or not at all. Up to 20 per batch.</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                {rows.map((r, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input value={r.target} onChange={(e) => setRowAt(i, { target: e.target.value })} placeholder="G…" style={{ flex: 1, background: "#0d0d0e", border: `1px solid ${r.target && !validAddr(r.target) ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
+                    <input value={r.amount} onChange={(e) => setRowAt(i, { amount: e.target.value })} placeholder="0.00" style={{ width: 110, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
+                    <button onClick={() => setRows((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 18, padding: "0 4px" }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setRows((xs) => (xs.length < 20 ? [...xs, { target: "", amount: "" }] : xs))} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer", marginBottom: 18 }}>+ Add payment</button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 14, marginBottom: 22 }}>
+                <span style={{ fontSize: 13, color: "#8A857B" }}>Batch total · {rows.length} payment{rows.length === 1 ? "" : "s"}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 24, color: "#ECE7DD" }}>{batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 })} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></span>
+              </div>
+            </>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#8A857B", marginBottom: 22 }}>
             <span>Vault balance · {balance != null ? formatXLM(balance) : "—"} XLM</span>
-            <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>
+            {!batchMode && <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>}
           </div>
+
+          {(guardWarnings.length > 0 || timelockNote) && (
+            <div style={{ border: `1px solid ${guardWarnings.length ? "rgba(196,93,74,0.32)" : "rgba(201,168,106,0.24)"}`, borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: guardWarnings.length ? "#C45D4A" : "#C9A86A", marginBottom: 9 }}>
+                {guardWarnings.length ? "GUARDS WILL REJECT THIS" : "GUARDS ACTIVE"}
+              </div>
+              {guardWarnings.map((w) => (
+                <div key={w} style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6 }}>• {w}</div>
+              ))}
+              {timelockNote && <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.6 }}>• {timelockNote}</div>}
+            </div>
+          )}
           {isPrivate && (
             <div className="vs-rise" style={{ display: "flex", gap: 12, border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
               <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
@@ -1062,7 +1382,14 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
               </div>
             </div>
           )}
-          <button onClick={() => submitPropose(target, amount)} disabled={busy === "propose"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: "pointer", opacity: busy === "propose" ? 0.6 : 1 }}>{busy === "propose" ? "Proposing…" : "Propose · sign with wallet"}</button>
+          {(() => {
+            const disabled = busy === "propose" || (batchMode && !batchReady);
+            return (
+              <button onClick={submit} disabled={disabled} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>
+                {busy === "propose" ? "Proposing…" : batchMode ? `Propose batch of ${rows.length} · sign with wallet` : "Propose · sign with wallet"}
+              </button>
+            );
+          })()}
         </div>
 
         <div style={{ position: "sticky", top: 96 }}>
@@ -1073,8 +1400,8 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", marginBottom: 18 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label="Recipient" value={target ? shortAddr(target) : "G…"} mono />
-                <Row label="Amount" value={`${amount || "0.00"} XLM`} mono />
+                <Row label="Recipient" value={batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
                 <div style={{ height: 1, background: "rgba(236,231,221,0.08)" }} />
                 <Row label="Approvals" value="visible to all" />
               </div>
@@ -1085,8 +1412,8 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
               <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🔒 PRIVATE · ZK</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label="Recipient" value={target ? shortAddr(target) : "G…"} mono />
-                <Row label="Amount" value={`${amount || "0.00"} XLM`} mono />
+                <Row label="Recipient" value={batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
@@ -1097,6 +1424,157 @@ function Propose({ go, mode, setMode, submitPropose, busy, balance }: { go: (s: 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ============================ GUARDS ============================ */
+/** Preset windows for the spending cap, in ledgers (~5s each). */
+const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
+const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
+
+function Guards({ go, wallet, config, policy, allowed, spent, busy, onSave, onAllowRecipient }: {
+  go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
+  policy: Policy; allowed: string[]; spent: bigint; busy: string | null;
+  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void;
+}) {
+  const isOwner = !!wallet && wallet === config?.owner;
+  const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
+  const [cap, setCap] = useState(policy.spending_cap > 0n ? String(xlmFromStroops(policy.spending_cap)) : "");
+  const [window, setWindow] = useState(policy.cap_window_ledgers || 17280);
+  const [timelock, setTimelock] = useState(policy.timelock_ledgers);
+  const [allowlistOnly, setAllowlistOnly] = useState(policy.allowlist_only);
+  const [newRecipient, setNewRecipient] = useState("");
+
+  // the vault is the source of truth — resync whenever a fresh read lands
+  useEffect(() => {
+    setMaxPerTx(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
+    setCap(policy.spending_cap > 0n ? String(xlmFromStroops(policy.spending_cap)) : "");
+    setWindow(policy.cap_window_ledgers || 17280);
+    setTimelock(policy.timelock_ledgers);
+    setAllowlistOnly(policy.allowlist_only);
+  }, [policy]);
+
+  const card: React.CSSProperties = { border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 26, marginBottom: 18 };
+  const input: React.CSSProperties = { width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "12px 14px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14 };
+  const chip = (active: boolean): React.CSSProperties => ({
+    background: active ? "rgba(201,168,106,0.12)" : "#0d0d0e",
+    border: `1px solid ${active ? "#C9A86A" : "rgba(236,231,221,0.12)"}`,
+    color: active ? "#C9A86A" : "#8A857B",
+    borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer",
+  });
+
+  let parseError = "";
+  let next: Policy | null = null;
+  try {
+    next = {
+      max_per_tx: maxPerTx.trim() ? stroopsFromXlm(maxPerTx) : 0n,
+      spending_cap: cap.trim() ? stroopsFromXlm(cap) : 0n,
+      cap_window_ledgers: window,
+      timelock_ledgers: timelock,
+      allowlist_only: allowlistOnly,
+    };
+  } catch (e: any) {
+    parseError = e.message;
+  }
+  const dirty = !!next && (
+    next.max_per_tx !== policy.max_per_tx ||
+    next.spending_cap !== policy.spending_cap ||
+    (next.spending_cap > 0n && next.cap_window_ledgers !== (policy.cap_window_ledgers || 17280)) ||
+    next.timelock_ledgers !== policy.timelock_ledgers ||
+    next.allowlist_only !== policy.allowlist_only
+  );
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto" }}>
+      <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
+      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Guards</h1>
+      <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
+        Rules the contract enforces on every execution — on top of the m-of-n threshold. This is what a smart-contract vault can do that native multi-sig can't.
+      </p>
+
+      {!isOwner && (
+        <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: 13, color: "#8A857B" }}>
+          Read-only — only the vault owner{config?.owner ? ` (${shortAddr(config.owner)})` : ""} can change guards.
+        </div>
+      )}
+
+      <div style={card}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Per-transaction limit</div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>The largest single execution allowed. Leave empty for no limit. A batch is judged on its total.</p>
+        <input value={maxPerTx} onChange={(e) => setMaxPerTx(e.target.value)} disabled={!isOwner} placeholder="No limit" style={input} />
+      </div>
+
+      <div style={card}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Spending cap</div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A rolling budget: total executed within one window can't exceed this. Empty = uncapped.</p>
+        <input value={cap} onChange={(e) => setCap(e.target.value)} disabled={!isOwner} placeholder="Uncapped" style={{ ...input, marginBottom: 14 }} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {CAP_WINDOWS.map(([label, v]) => (
+            <button key={label} onClick={() => isOwner && setWindow(v)} disabled={!isOwner} style={chip(window === v)}>{label}</button>
+          ))}
+        </div>
+        {policy.spending_cap > 0n && <CapMeter spent={spent} cap={policy.spending_cap} />}
+      </div>
+
+      <div style={card}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Time-lock</div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A cooling-off period between proposing and executing — the window in which co-signers can cancel a bad transaction.</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {TIMELOCK_PRESETS.map(([label, v]) => (
+            <button key={label} onClick={() => isOwner && setTimelock(v)} disabled={!isOwner} style={chip(timelock === v)}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>Recipient allowlist</div>
+          <button onClick={() => isOwner && setAllowlistOnly(!allowlistOnly)} disabled={!isOwner} style={chip(allowlistOnly)}>{allowlistOnly ? "On" : "Off"}</button>
+        </div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16 }}>When on, funds can only go to addresses on this list — proposals to anyone else are refused at propose time and again at execute.</p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {allowed.map((a) => (
+            <div key={a} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(a, 8, 6)}</span>
+              {isOwner && (
+                <button onClick={() => onAllowRecipient(a, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
+              )}
+            </div>
+          ))}
+          {!allowed.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>No recipients allowed yet — turning the allowlist on now would block every payment.</div>}
+        </div>
+
+        {isOwner && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newRecipient} onChange={(e) => setNewRecipient(e.target.value)} placeholder="G…" style={{ ...input, flex: 1 }} />
+            <button
+              onClick={() => { onAllowRecipient(newRecipient.trim(), true); setNewRecipient(""); }}
+              disabled={!/^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) || !!busy}
+              className="h-goldbtn"
+              style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) ? 1 : 0.45 }}
+            >Allow</button>
+          </div>
+        )}
+      </div>
+
+      {isOwner && (
+        <>
+          {parseError && <div style={{ fontSize: 13, color: "#C45D4A", marginBottom: 12 }}>{parseError}</div>}
+          <button
+            onClick={() => next && onSave(next)}
+            disabled={!dirty || !!parseError || busy === "policy"}
+            className="h-goldbtn"
+            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: dirty ? "pointer" : "not-allowed", opacity: dirty && !parseError ? 1 : 0.45 }}
+          >
+            {busy === "policy" ? "Saving · check Freighter…" : dirty ? "Save guards · sign with wallet" : "No changes to save"}
+          </button>
+          <p style={{ fontSize: 11.5, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
+            Guards apply to pending proposals too — tightening a limit can block one that was already approved.
+          </p>
+        </>
+      )}
     </div>
   );
 }
