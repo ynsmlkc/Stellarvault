@@ -23,7 +23,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
-    symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, String, Symbol, U256, Vec,
+    symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, U256, Vec,
 };
 
 const OWNER: Symbol = symbol_short!("owner");
@@ -34,6 +34,8 @@ const SIGNERS: Symbol = symbol_short!("signers");
 const NEXTTX: Symbol = symbol_short!("nexttx");
 const POLICY: Symbol = symbol_short!("policy");
 const ALLOWED: Symbol = symbol_short!("allowed");
+/// Holds the whole [`ZkConfig`]; absent means this vault does not verify proofs.
+const VERIFIER: Symbol = symbol_short!("verifier");
 
 /// Contract code version — lets the dashboard tell a guard-capable vault (2)
 /// from a pre-guards one (1, which has no `version` entry point at all).
@@ -79,6 +81,13 @@ pub enum Error {
     // --- batch ---
     EmptyBatch = 22,
     BatchTooLarge = 23,
+    // --- on-chain zk verification ---
+    /// The Groth16 verifier rejected the proof.
+    ProofRejected = 24,
+    /// A public input did not match what this vault expects for this proposal.
+    PublicInputMismatch = 25,
+    /// The proof blob was not 256 bytes of `a || b || c`.
+    BadProofEncoding = 26,
 }
 
 #[contracttype]
@@ -162,9 +171,35 @@ pub struct Proposal {
 #[contracttype]
 #[derive(Clone)]
 pub struct ZKApproval {
+    /// 256 bytes: `a (64) || b (128) || c (64)`, in the BN254 host's layout.
     pub proof: Bytes,
+    /// `[vaultId, txId, signerRoot, nullifier]`, each a 32-byte big-endian
+    /// field element.
     pub public_inputs: Vec<BytesN<32>>,
     pub nullifier: U256,
+}
+
+/// A Groth16 proof, shaped to match `groth16-verifier`'s `Proof`. Field names
+/// are what the cross-contract call matches on, so they must stay in sync.
+#[contracttype]
+#[derive(Clone)]
+pub struct Groth16Proof {
+    pub a: BytesN<64>,
+    pub b: BytesN<128>,
+    pub c: BytesN<64>,
+}
+
+/// What a vault must know before it can check a proof itself.
+///
+/// `vault_id` and `signer_root` are the two public inputs the vault pins down;
+/// without them a valid proof for *some* vault would count as a valid proof for
+/// *this* one.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ZkConfig {
+    pub verifier: Address,
+    pub vault_id: U256,
+    pub signer_root: U256,
 }
 
 #[contractevent]
@@ -218,6 +253,13 @@ pub struct PolicyUpdatedEvent {
 pub struct AllowlistChangedEvent {
     #[topic] pub target: Address,
     pub allowed: bool,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct ZkConfigSetEvent {
+    #[topic] pub by: Address,
+    pub config: ZkConfig,
 }
 
 #[contract]
@@ -338,6 +380,11 @@ impl VaultInstance {
     }
 
     /// ZK approval — identity hidden (only the nullifier is recorded).
+    ///
+    /// Once [`set_zk_config`] has been called, the proof is verified on-chain
+    /// and its public inputs are pinned to this vault and this proposal. Before
+    /// that, the vault only records the nullifier — see [`set_zk_config`] for
+    /// why that weaker mode still exists.
     pub fn approve_zk(env: Env, tx_id: u64, signer: Address, zk: ZKApproval) -> Result<(), Error> {
         signer.require_auth();
         Self::require_signer(&env, &signer)?;
@@ -350,6 +397,7 @@ impl VaultInstance {
         if zk.proof.len() == 0 {
             return Err(Error::EmptyProof);
         }
+        Self::check_proof(&env, tx_id, &zk)?;
         env.storage().persistent().set(&nk, &true);
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
@@ -486,6 +534,31 @@ impl VaultInstance {
         }
         env.storage().instance().set(&ALLOWED, &next);
         AllowlistChangedEvent { target, allowed: false }.publish(&env);
+    }
+
+    /// Turn on on-chain proof verification for this vault.
+    ///
+    /// `vault_id` and `signer_root` are the field elements the circuit was
+    /// proved against: the domain separator for this vault, and the Merkle root
+    /// of its signer commitments. Pinning them here is what makes a proof
+    /// *this* vault's proof — a valid proof for another vault, or against a
+    /// signer set the owner never published, is refused.
+    ///
+    /// A vault with no config set records nullifiers without verifying, which
+    /// is how every vault deployed before this existed still behaves. That mode
+    /// is weaker on purpose and only for those: `get_zk_config` returning
+    /// `None` is the honest signal that a vault is in it.
+    pub fn set_zk_config(env: Env, verifier: Address, vault_id: U256, signer_root: U256) {
+        let owner = Self::require_owner(&env);
+        let cfg = ZkConfig { verifier, vault_id, signer_root };
+        env.storage().instance().set(&VERIFIER, &cfg);
+        ZkConfigSetEvent { by: owner, config: cfg }.publish(&env);
+    }
+
+    /// The verifier and pinned public inputs, or `None` if this vault does not
+    /// verify proofs on-chain.
+    pub fn get_zk_config(env: Env) -> Option<ZkConfig> {
+        env.storage().instance().get(&VERIFIER)
     }
 
     // ---------------- admin (owner) ----------------
@@ -702,6 +775,61 @@ impl VaultInstance {
 
     fn allowlist(env: &Env) -> Vec<Address> {
         env.storage().instance().get(&ALLOWED).unwrap_or_else(|| Vec::new(env))
+    }
+
+    /// Verify a ZK approval against the configured verifier, and pin every
+    /// public input to something this contract already knows.
+    ///
+    /// Binding `txId` is not optional. The circuit derives
+    /// `nullifier = Poseidon(commitment, txId)` and takes `txId` as a *public
+    /// input*, so a signer free to choose it could mint a fresh nullifier per
+    /// proof and approve one proposal as many times as they liked — reaching
+    /// the threshold alone. Verifying the proof without this check would buy
+    /// nothing.
+    fn check_proof(env: &Env, tx_id: u64, zk: &ZKApproval) -> Result<(), Error> {
+        let cfg: ZkConfig = match env.storage().instance().get(&VERIFIER) {
+            Some(c) => c,
+            None => return Ok(()), // unenforced mode — see set_zk_config
+        };
+
+        if zk.public_inputs.len() != 4 {
+            return Err(Error::PublicInputMismatch);
+        }
+        // the verifier takes field elements, the wire format is 32-byte limbs
+        let mut inputs: Vec<U256> = Vec::new(env);
+        for limb in zk.public_inputs.iter() {
+            inputs.push_back(U256::from_be_bytes(
+                env,
+                &Bytes::from_array(env, &limb.to_array()),
+            ));
+        }
+
+        // [vaultId, txId, signerRoot, nullifier] — all four are ours to dictate
+        if inputs.get(0).unwrap() != cfg.vault_id
+            || inputs.get(1).unwrap() != U256::from_u128(env, tx_id as u128)
+            || inputs.get(2).unwrap() != cfg.signer_root
+            || inputs.get(3).unwrap() != zk.nullifier
+        {
+            return Err(Error::PublicInputMismatch);
+        }
+
+        if zk.proof.len() != 256 {
+            return Err(Error::BadProofEncoding);
+        }
+        let a: BytesN<64> = zk.proof.slice(0..64).try_into().map_err(|_| Error::BadProofEncoding)?;
+        let b: BytesN<128> = zk.proof.slice(64..192).try_into().map_err(|_| Error::BadProofEncoding)?;
+        let c: BytesN<64> = zk.proof.slice(192..256).try_into().map_err(|_| Error::BadProofEncoding)?;
+
+        let ok: bool = env.invoke_contract(
+            &cfg.verifier,
+            &Symbol::new(env, "verify"),
+            (Groth16Proof { a, b, c }, inputs).into_val(env),
+        );
+        if ok {
+            Ok(())
+        } else {
+            Err(Error::ProofRejected)
+        }
     }
 
     fn check_limit(policy: &Policy, amount: i128) -> Result<(), Error> {

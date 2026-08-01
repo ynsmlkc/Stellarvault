@@ -499,3 +499,205 @@ fn test_negative_policy_rejected() {
         Err(Ok(Error::InvalidPolicy))
     );
 }
+
+// ------------------------------------------------ on-chain proof enforcement
+
+use soroban_sdk::{contract, contractimpl, symbol_short, BytesN, Symbol};
+
+const ACCEPT: Symbol = symbol_short!("accept");
+
+/// Stands in for `groth16-verifier`. The real cryptography is tested in that
+/// crate against a real proof; what needs testing *here* is that the vault pins
+/// every public input to itself and to the proposal, and that it acts on the
+/// verifier's answer. A mock makes both answers reachable on demand.
+#[contract]
+pub struct MockVerifier;
+
+#[contractimpl]
+impl MockVerifier {
+    pub fn __constructor(env: Env, accept: bool) {
+        env.storage().instance().set(&ACCEPT, &accept);
+    }
+    pub fn verify(env: Env, _proof: crate::Groth16Proof, _public_inputs: Vec<U256>) -> bool {
+        env.storage().instance().get(&ACCEPT).unwrap()
+    }
+}
+
+const VAULT_ID: u32 = 7;
+const SIGNER_ROOT: u32 = 0xB007;
+
+/// Wire a vault to a mock verifier and return the helper that builds a ZK
+/// approval whose public inputs match what the vault will demand.
+fn with_verifier(s: &Setup, accept: bool) {
+    let v = s.env.register(MockVerifier, (accept,));
+    s.vault.set_zk_config(
+        &v,
+        &U256::from_u32(&s.env, VAULT_ID),
+        &U256::from_u32(&s.env, SIGNER_ROOT),
+    );
+}
+
+/// A well-formed approval: 256-byte proof, the four public inputs the vault
+/// expects, nullifier matching the one proven.
+fn zk_for(s: &Setup, tx_id: u64, nullifier: u32) -> ZKApproval {
+    let limb = |v: u32| -> BytesN<32> {
+        let mut b = [0u8; 32];
+        b[28..].copy_from_slice(&v.to_be_bytes());
+        BytesN::from_array(&s.env, &b)
+    };
+    let mut inputs = Vec::new(&s.env);
+    inputs.push_back(limb(VAULT_ID));
+    inputs.push_back(limb(tx_id as u32));
+    inputs.push_back(limb(SIGNER_ROOT));
+    inputs.push_back(limb(nullifier));
+    ZKApproval {
+        proof: Bytes::from_array(&s.env, &[7u8; 256]),
+        public_inputs: inputs,
+        nullifier: U256::from_u32(&s.env, nullifier),
+    }
+}
+
+#[test]
+fn test_zk_config_round_trips() {
+    let s = setup(1);
+    assert!(s.vault.get_zk_config().is_none(), "a fresh vault does not verify");
+    with_verifier(&s, true);
+    let cfg = s.vault.get_zk_config().unwrap();
+    assert_eq!(cfg.vault_id, U256::from_u32(&s.env, VAULT_ID));
+    assert_eq!(cfg.signer_root, U256::from_u32(&s.env, SIGNER_ROOT));
+}
+
+#[test]
+fn test_verified_proof_is_accepted() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    s.vault.approve_zk(&tx, &s.signer(0), &zk_for(&s, tx, 1));
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+}
+
+#[test]
+fn test_rejected_proof_does_not_count() {
+    let s = setup(1);
+    with_verifier(&s, false); // verifier says no
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk_for(&s, tx, 1)),
+        Err(Ok(Error::ProofRejected))
+    );
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 0);
+}
+
+/// The reason binding txId matters. The circuit derives the nullifier from
+/// txId, and txId is a *public input the prover chooses*. Left unbound, one
+/// signer could mint a fresh nullifier per proof — each individually valid,
+/// each passing the double-vote check — and approve the same proposal until
+/// the threshold was met, alone. Verifying the proof alone would not stop it.
+#[test]
+fn test_proof_for_another_proposal_cannot_be_replayed() {
+    let s = setup(2);
+    with_verifier(&s, true);
+    let a = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    let b = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &20, &true);
+
+    // an approval proved against proposal `a`, aimed at proposal `b`
+    assert_eq!(
+        s.vault.try_approve_zk(&b, &s.signer(0), &zk_for(&s, a, 1)),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+    assert_eq!(s.vault.get_proposal(&b).approval_count, 0);
+}
+
+#[test]
+fn test_proof_for_another_vault_is_rejected() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    let mut zk = zk_for(&s, tx, 1);
+    let mut wrong = [0u8; 32];
+    wrong[31] = 0xFF; // a different vault's domain id
+    zk.public_inputs.set(0, BytesN::from_array(&s.env, &wrong));
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+}
+
+#[test]
+fn test_proof_against_unpublished_signer_set_is_rejected() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    // a root the owner never committed to — i.e. a signer set of the prover's
+    // own invention
+    let mut zk = zk_for(&s, tx, 1);
+    let mut root = [0u8; 32];
+    root[31] = 0x42;
+    zk.public_inputs.set(2, BytesN::from_array(&s.env, &root));
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+}
+
+#[test]
+fn test_recorded_nullifier_must_match_the_proven_one() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    // proof says nullifier 1, the caller asks to record 2 — otherwise a signer
+    // could burn someone else's tag, or keep their own unspent
+    let mut zk = zk_for(&s, tx, 1);
+    zk.nullifier = U256::from_u32(&s.env, 2);
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+}
+
+#[test]
+fn test_malformed_proof_blob_is_rejected() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    let mut zk = zk_for(&s, tx, 1);
+    zk.proof = Bytes::from_array(&s.env, &[7u8; 128]); // not a || b || c
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk),
+        Err(Ok(Error::BadProofEncoding))
+    );
+}
+
+#[test]
+fn test_wrong_public_input_arity_is_rejected() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    let mut zk = zk_for(&s, tx, 1);
+    zk.public_inputs.pop_back();
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+}
+
+/// Vaults deployed before this feature existed keep working — unverified, and
+/// `get_zk_config` returns None so nothing pretends otherwise.
+#[test]
+fn test_unconfigured_vault_stays_in_unenforced_mode() {
+    let s = setup(1);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    let zk = ZKApproval {
+        proof: Bytes::from_array(&s.env, &[1u8; 8]),
+        public_inputs: Vec::new(&s.env),
+        nullifier: U256::from_u32(&s.env, 0xAB),
+    };
+    s.vault.approve_zk(&tx, &s.signer(0), &zk);
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+    assert!(s.vault.get_zk_config().is_none());
+}
