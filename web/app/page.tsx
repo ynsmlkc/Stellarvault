@@ -1362,15 +1362,21 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
             {!batchMode && <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>}
           </div>
 
-          {(guardWarnings.length > 0 || timelockNote) && (
-            <div style={{ border: `1px solid ${guardWarnings.length ? "rgba(196,93,74,0.32)" : "rgba(201,168,106,0.24)"}`, borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
-              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: guardWarnings.length ? "#C45D4A" : "#C9A86A", marginBottom: 9 }}>
-                {guardWarnings.length ? "GUARDS WILL REJECT THIS" : "GUARDS ACTIVE"}
-              </div>
+          {/* a refusal and a heads-up are different things — never in the same box */}
+          {guardWarnings.length > 0 && (
+            <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 14 }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>GUARDS WILL REJECT THIS</div>
               {guardWarnings.map((w) => (
                 <div key={w} style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6 }}>• {w}</div>
               ))}
-              {timelockNote && <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.6 }}>• {timelockNote}</div>}
+            </div>
+          )}
+          {timelockNote && (
+            <div style={{ display: "flex", gap: 10, border: "1px solid rgba(201,168,106,0.22)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22 }}>
+              <span style={{ color: "#C9A86A", lineHeight: 1.4 }}>⏻</span>
+              <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>
+                <span style={{ color: "#ECE7DD" }}>This will propose fine.</span> {timelockNote}
+              </div>
             </div>
           )}
           {isPrivate && (
@@ -1383,10 +1389,20 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
             </div>
           )}
           {(() => {
-            const disabled = busy === "propose" || (batchMode && !batchReady);
+            // if we already know a guard will refuse this, don't offer a button
+            // that looks live — the contract would reject it anyway
+            const blocked = guardWarnings.length > 0;
+            const disabled = busy === "propose" || blocked || (batchMode && !batchReady);
+            const label = busy === "propose"
+              ? "Proposing…"
+              : blocked
+                ? "Blocked by guards"
+                : batchMode
+                  ? `Propose batch of ${rows.length} · sign with wallet`
+                  : "Propose · sign with wallet";
             return (
-              <button onClick={submit} disabled={disabled} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>
-                {busy === "propose" ? "Proposing…" : batchMode ? `Propose batch of ${rows.length} · sign with wallet` : "Propose · sign with wallet"}
+              <button onClick={submit} disabled={disabled} className={blocked ? undefined : "h-goldbtn"} style={{ width: "100%", background: blocked ? "transparent" : "#C9A86A", color: blocked ? "#C45D4A" : "#0A0A0B", border: blocked ? "1px solid rgba(196,93,74,0.4)" : "none", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled && !blocked ? 0.5 : 1 }}>
+                {label}
               </button>
             );
           })()}
