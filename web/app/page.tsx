@@ -20,6 +20,7 @@ import {
   proposeBatch,
   approve as approveTx,
   approveZk,
+  approveZkAnon,
   execute as executeTx,
   cancel as cancelTx,
   depositToVault,
@@ -350,7 +351,14 @@ export default function Page() {
       if (!ok) throw new Error("Local proof verification failed");
 
       setProofStage(2); // submitting on-chain
-      await approveZk(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      // With verification on, the proof authorizes itself and no wallet has to
+      // name itself. Without it the contract still demands a signer, because an
+      // unchecked proof plus no auth would let anyone approve.
+      if (zkConfig) {
+        await approveZkAnon(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      } else {
+        await approveZk(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      }
 
       setProof(false);
       setProofStage(0);
@@ -358,7 +366,9 @@ export default function Page() {
       refreshSoon();
       showToast({
         title: "Anonymous approval submitted",
-        sub: `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · voter identity hidden`,
+        sub: zkConfig
+          ? `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · no wallet identified itself`
+          : `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · proof not verified on this vault`,
         tone: "ok",
       });
     } catch (e: any) {

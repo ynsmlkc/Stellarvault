@@ -101,6 +101,8 @@ pub enum Error {
     SelfCallForbidden = 28,
     /// The call allowlist is full.
     CallAllowlistFull = 29,
+    /// Anonymous approval needs on-chain verification switched on first.
+    VerificationNotEnabled = 30,
 }
 
 #[contracttype]
@@ -471,6 +473,46 @@ impl VaultInstance {
             return Err(Error::EmptyProof);
         }
         Self::check_proof(&env, tx_id, &zk)?;
+        env.storage().persistent().set(&nk, &true);
+        p.approval_count += 1;
+        env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+
+        ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
+        Ok(())
+    }
+
+    /// Approve anonymously: the proof is the authorization, so no wallet needs
+    /// to identify itself and anyone at all can submit.
+    ///
+    /// [`approve_zk`] hides the approver in the *event* while the transaction
+    /// still names them — it calls `require_auth` on the signer, so the
+    /// envelope and the argument both give it away. Anyone can read a vault's
+    /// events, take the transaction hash, and ask the network who sent it. The
+    /// proof was doing real work and the plumbing around it was undoing that.
+    ///
+    /// Once proofs are verified on-chain that identification is redundant: a
+    /// valid proof already establishes membership in the published signer set,
+    /// binds itself to this proposal, and burns a nullifier so it counts once.
+    /// A wallet signature adds nothing except the name.
+    ///
+    /// This is refused unless verification is enabled — without it the proof is
+    /// not checked, and dropping the auth as well would let anyone approve.
+    pub fn approve_zk_anon(env: Env, tx_id: u64, zk: ZKApproval) -> Result<(), Error> {
+        if Self::get_zk_config(env.clone()).is_none() {
+            return Err(Error::VerificationNotEnabled);
+        }
+        let mut p = Self::proposal(&env, tx_id)?;
+        Self::require_open(&env, tx_id, &p)?;
+
+        let nk = DataKey::Nullifier(zk.nullifier.clone());
+        if env.storage().persistent().has(&nk) {
+            return Err(Error::NullifierUsed);
+        }
+        if zk.proof.len() == 0 {
+            return Err(Error::EmptyProof);
+        }
+        Self::check_proof(&env, tx_id, &zk)?;
+
         env.storage().persistent().set(&nk, &true);
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);

@@ -60,7 +60,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | ----------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Soroban multi-sig vault**                     | ✅ **Live on testnet**   | create vault, signer mgmt, threshold, propose, approve, execute, cancel — 7/7 contract tests pass                                                                                                                     |
 | **Transparent flow**                            | ✅ **Fully working**     | propose → approve → execute moves **real XLM** on testnet, wallet-signed                                                                                                                                              |
-| **ZK voter privacy**                            | ✅ **Real ZK**           | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), real Groth16 proofs generated **in-browser**, `approve_zk` records the nullifier on-chain — identity hidden in the event, double-vote prevented |
+| **ZK voter privacy**                            | ✅ **Real ZK**           | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), proofs generated **in-browser** and verified **on-chain**; signer keys come from a wallet signature, leaves are published shuffled, and `approve_zk_anon` needs no wallet to identify itself — see the limits below |
 | **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
 | **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
@@ -128,8 +128,8 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 52 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 41 pass (vault + guards + zk + calls)
+# 56 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 45 pass (vault + guards + zk + calls)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
 cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
 cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
@@ -173,7 +173,7 @@ Proofs are generated **in the browser** with snarkjs (~0.3s), and `approve_zk` *
 
 ### Why verifying the proof was not enough
 
-The nullifier is `Poseidon(commitment, txId)` and `txId` is a public input **the prover chooses**. A contract that verified the proof but left `txId` unbound would still be broken: one signer could pick arbitrary `txId` values, produce a valid proof for each, and get a fresh nullifier every time — every approval individually valid, every one passing the double-vote check — and approve a single proposal until the threshold was met, alone.
+The nullifier is `Poseidon(commitment, txId)` and `txId` is a public input **the prover chooses**. A contract that verified the proof but left `txId` unbound would still be broken: one signer could pick arbitrary `txId` values, produce a valid proof for each, get a fresh nullifier every time, and approve a single proposal until the threshold was met, alone.
 
 So the vault pins every public input to something it already knows:
 
@@ -181,32 +181,22 @@ So the vault pins every public input to something it already knows:
 | ------------ | --------------- |
 | `vaultId`    | this vault's domain id |
 | `txId`       | the proposal being approved |
-| `signerRoot` | the root the owner published via `set_zk_config` |
+| `signerRoot` | the root the owner published |
 | `nullifier`  | the nullifier being recorded |
 
-None of the four is the prover's to choose. `get_zk_config()` returning `None` is the honest signal that a vault predates enforcement and only records nullifiers.
+### What the anonymity is, precisely
 
----
+Three separate things had to be true, and each was a distinct fix:
 
-## Guards: programmable spending rules
+1. **The commitment must be unguessable.** It is derived from a wallet signature over a fixed per-vault message (Ed25519 is deterministic, so a signer regenerates it on demand and stores nothing). Deriving it from the signer's *address* — as an earlier version did — made every input public, and an observer could compute `Poseidon(commitment, txId)` for each signer and match it against the published nullifier. With three signers that was three guesses.
+2. **The published leaves must not be attributable.** A prover needs every leaf to build its Merkle path, so the list is necessarily public — but published in signer order it hands back the same mapping. The owner publishes them **shuffled**.
+3. **No wallet may have to identify itself.** `approve_zk_anon` takes no signer address and calls no `require_auth`: the proof is the authorization. Verified on testnet by having a non-signer submit a valid approval, with the ledger recording only the submitter.
 
-The threshold answers *"did enough people agree?"*. Guards answer *"is this transaction allowed at all?"* — and the vault enforces them itself, on every execution.
+**What still leaks, plainly:**
 
-| Guard | What it does | Rejects with |
-| --------------------- | ------------------------------------------------------------------------------ | ------------------------ |
-| **Per-tx limit**      | caps a single execution; a batch is judged on its **total**, so splitting a payment doesn't get around it | `ExceedsMaxPerTx` (#14) |
-| **Spending cap**      | a rolling budget per window (1h / 6h / 1d / 1w) — spend accrues, the window resets | `ExceedsSpendingCap` (#15) |
-| **Time-lock**         | a cooling-off period between propose and execute — the window in which co-signers can cancel | `TimelockActive` (#16)  |
-| **Recipient allowlist** | funds may only leave to approved addresses; checked at propose **and** again at execute | `RecipientNotAllowed` (#17) |
-
-Two design decisions worth calling out:
-
-- **Guards are re-checked at execute, not just at propose.** Tightening the policy — or revoking a recipient — blocks a proposal that had already collected its approvals. The alternative (trusting the propose-time check) would let a stale proposal outlive the rule that was meant to stop it.
-- **A vault with no policy set is unrestricted.** The default is fully permissive, so upgrading an existing vault never changes its behaviour until the owner opts in.
-
-Every rejection is a **typed contract error**, so the UI can say *"Time-locked · 8 min left"* instead of surfacing a raw host panic. Add **batch (multi-call)** — up to 20 payments approved once and settled atomically — and **cancellation**, which is now distinct from execution rather than sharing the `executed` flag.
-
-`vault-instance` covers all of this in **24 unit tests**, and each guard was verified live on testnet — see `deployments/testnet/addresses.txt`.
+- **The anonymity set is the signer count.** If 2 of 3 approved, an observer knows exactly that — each signer is 2/3 likely to be one of them. This is structural: proving the threshold was met is the point. It only becomes meaningful privacy with a larger signer set (the tree holds 16).
+- **Whoever collects the commitments knows the mapping**, unless registration is itself relayed.
+- **The submitter is still a public account.** `approve_zk_anon` makes relaying *possible*; until a relayer exists, a signer submitting their own proof is still named by the transaction.
 
 ---
 

@@ -851,3 +851,68 @@ fn test_call_moves_a_token_the_vault_was_not_created_with() {
     assert_eq!(other_token.balance(&recipient), 400);
     assert_eq!(other_token.balance(&s.vault_addr), 600);
 }
+
+// ------------------------------------------- anonymous (unauthenticated) approval
+
+#[test]
+fn test_anon_approval_needs_verification_enabled() {
+    let s = setup(1);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    // no zk config: the proof would not be checked, so dropping the auth too
+    // would let anyone approve
+    assert_eq!(
+        s.vault.try_approve_zk_anon(&tx, &zk_for(&s, tx, 1)),
+        Err(Ok(Error::VerificationNotEnabled))
+    );
+}
+
+/// The whole point: a wallet that is NOT a signer submits a valid proof, and it
+/// counts. That is what lets a relayer — or any third party — carry an approval
+/// without the ledger recording who produced it.
+#[test]
+fn test_anyone_can_submit_a_valid_proof() {
+    let s = setup(1);
+    with_verifier(&s, true);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+
+    let stranger = Address::generate(&s.env);
+    assert!(!s.vault.is_signer(&stranger));
+
+    // no `signer` argument exists on this entry point at all
+    s.vault.approve_zk_anon(&tx, &zk_for(&s, tx, 1));
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+}
+
+#[test]
+fn test_anon_approval_still_rejects_a_bad_proof() {
+    let s = setup(1);
+    with_verifier(&s, false); // verifier says no
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    assert_eq!(
+        s.vault.try_approve_zk_anon(&tx, &zk_for(&s, tx, 1)),
+        Err(Ok(Error::ProofRejected))
+    );
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 0);
+}
+
+#[test]
+fn test_anon_approval_cannot_be_replayed_or_double_counted() {
+    let s = setup(2);
+    with_verifier(&s, true);
+    let a = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &true);
+    let b = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &20, &true);
+
+    s.vault.approve_zk_anon(&a, &zk_for(&s, a, 1));
+    // same nullifier again
+    assert_eq!(
+        s.vault.try_approve_zk_anon(&a, &zk_for(&s, a, 1)),
+        Err(Ok(Error::NullifierUsed))
+    );
+    // proof aimed at another proposal
+    assert_eq!(
+        s.vault.try_approve_zk_anon(&b, &zk_for(&s, a, 2)),
+        Err(Ok(Error::PublicInputMismatch))
+    );
+    assert_eq!(s.vault.get_proposal(&a).approval_count, 1);
+    assert_eq!(s.vault.get_proposal(&b).approval_count, 0);
+}
