@@ -80,9 +80,9 @@ Earlier iterations CDSIBLZ3… and CBBBYFMR… were abandoned when the factory l
 GROTH16_VERIFIER = CDAG3Y7JS52WCIOWO37FDXVTS5WQBSCRNPO42NRSKV53LYQQTPWH3GLB
   Keyed to circuits/voteApproval.circom — the vk is compiled in, not settable.
 
-vault-instance v3 = 2ae82de817c0070dfe9a27e3f60c59b252f983544539d681c0e882de64cc0bc7
-  factory.set_wasm applied 2026-08-02. Adds set_zk_config / get_zk_config and
-  real proof verification in approve_zk.
+vault-instance, VERSION 2 = 2ae82de817c0070dfe9a27e3f60c59b252f983544539d681c0e882de64cc0bc7
+  Adds set_zk_config / get_zk_config and real proof verification in approve_zk.
+  Served by the factory 2026-08-02, superseded the same week.
 
 End-to-end verified vault: CCCZ2COHPXTMA43CJVV5BYNQJ6G2PRHGKCOWIAMABMPX7YCFDQOPSQWV
   - proof generated with the browser's exact derivation (347ms)
@@ -90,3 +90,31 @@ End-to-end verified vault: CCCZ2COHPXTMA43CJVV5BYNQJ6G2PRHGKCOWIAMABMPX7YCFDQOPS
   - the same proof replayed onto a different proposal was refused
 
 Reproduce: cd circuits && DEPLOYER_SECRET=... node e2e-onchain.mjs <vault> <verifier>
+
+---
+
+## Arbitrary contract calls (2026-08-02)
+
+vault-instance, VERSION 3 = 239ac5861f11b4719c42b16432a74d25e1313da63a9a17aeb1fa70584cfa50dd
+  factory.set_wasm applied — this is what new vaults get now.
+  Adds propose_call / allow_contract / revoke_contract / get_allowed_contracts
+  / get_call. Multi-asset falls out of it: a token the vault was not created
+  with is just another contract to call.
+
+Guards on this path: the threshold and the time-lock apply; the amount limits
+cannot, because a call carries no amount the contract can read. The call
+allowlist stands in for them, and starts EMPTY — a fresh vault cannot call
+anything until the owner names targets.
+
+The vault can never be its own call target. Refused both when allowlisting and
+when proposing: otherwise one passing proposal could call set_policy, add_signer
+or upgrade, and lift every guard it was subject to.
+
+Verified on testnet, isolated vault CCSB7RF5ZC646D4YQI26DPPUQ7A54IVLJJ4EDOBH5Z34HYVVMTRRPQFV:
+  - propose_call with an empty allowlist -> Error(Contract, #27)
+  - allow_contract(self)                 -> Error(Contract, #28)
+  - allowed call: the vault invoked the XLM SAC's transfer AS ITSELF, moving
+    3 XLM out of its own balance, emitting CallExecutedEvent
+
+First vault from the upgraded factory: CAXGKR2ZCQFEZ67IDIAFPHR6KD4BFVSS3HAZOFALODUVHRSBBKOHULZN
+  version() = 3, empty call allowlist, no zk config — i.e. safe defaults.
