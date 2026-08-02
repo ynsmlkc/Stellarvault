@@ -23,7 +23,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
-    symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, U256, Vec,
+    symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, U256, Val, Vec,
 };
 
 const OWNER: Symbol = symbol_short!("owner");
@@ -34,12 +34,16 @@ const SIGNERS: Symbol = symbol_short!("signers");
 const NEXTTX: Symbol = symbol_short!("nexttx");
 const POLICY: Symbol = symbol_short!("policy");
 const ALLOWED: Symbol = symbol_short!("allowed");
+/// Contracts that proposals are permitted to call. Empty = no calls at all.
+const CALLOWED: Symbol = symbol_short!("callowed");
 /// Holds the whole [`ZkConfig`]; absent means this vault does not verify proofs.
 const VERIFIER: Symbol = symbol_short!("verifier");
 
-/// Contract code version — lets the dashboard tell a guard-capable vault (2)
-/// from a pre-guards one (1, which has no `version` entry point at all).
-const VERSION: u32 = 2;
+/// Contract code version, so the dashboard can tell what a vault can do:
+///   1 — pre-guards (no `version` entry point at all)
+///   2 — guards, batch, cancellation, typed errors
+///   3 — on-chain proof verification + arbitrary contract calls
+const VERSION: u32 = 3;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -88,6 +92,13 @@ pub enum Error {
     PublicInputMismatch = 25,
     /// The proof blob was not 256 bytes of `a || b || c`.
     BadProofEncoding = 26,
+    // --- arbitrary contract calls ---
+    /// The target contract is not on the vault's call allowlist.
+    ContractNotAllowed = 27,
+    /// A proposal tried to make the vault call itself.
+    SelfCallForbidden = 28,
+    /// The call allowlist is full.
+    CallAllowlistFull = 29,
 }
 
 #[contracttype]
@@ -102,6 +113,9 @@ pub enum DataKey {
     Batch(u64),
     /// Amount executed within a rolling cap window, keyed by window index.
     Spent(u32),
+    /// The contract call a proposal performs, when it is a call rather than a
+    /// transfer.
+    Call(u64),
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -143,6 +157,19 @@ pub struct ProposalStatus {
 pub struct BatchItem {
     pub target: Address,
     pub amount: i128,
+}
+
+/// A call the vault makes to another contract once a proposal passes.
+///
+/// This is what turns the vault from a shared wallet into a smart account: it
+/// can swap on a DEX, supply to a lending market, or move an asset other than
+/// the one it was created with — anything a plain account could do.
+#[contracttype]
+#[derive(Clone)]
+pub struct CallSpec {
+    pub contract: Address,
+    pub function: Symbol,
+    pub args: Vec<Val>,
 }
 
 #[contracttype]
@@ -257,6 +284,22 @@ pub struct AllowlistChangedEvent {
 
 #[contractevent]
 #[derive(Clone)]
+pub struct CallTargetChangedEvent {
+    #[topic] pub contract: Address,
+    pub allowed: bool,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct CallExecutedEvent {
+    #[topic] pub tx_id: u64,
+    pub contract: Address,
+    pub function: Symbol,
+    pub executed_by: Address,
+}
+
+#[contractevent]
+#[derive(Clone)]
 pub struct ZkConfigSetEvent {
     #[topic] pub by: Address,
     pub config: ZkConfig,
@@ -362,6 +405,34 @@ impl VaultInstance {
         Ok(tx_id)
     }
 
+    /// Propose a call to another contract — a swap, a supply, a transfer of an
+    /// asset this vault wasn't created with. The vault executes it as itself,
+    /// so it acts with its own authority and its own balances.
+    ///
+    /// Unlike transfers, calls are allowlist-only: the target must have been
+    /// approved by the owner via [`allow_contract`]. A vault with an empty call
+    /// allowlist cannot make calls at all, which is the safe default.
+    pub fn propose_call(
+        env: Env,
+        proposer: Address,
+        contract: Address,
+        function: Symbol,
+        args: Vec<Val>,
+        private_mode: bool,
+    ) -> Result<u64, Error> {
+        proposer.require_auth();
+        Self::require_signer(&env, &proposer)?;
+        Self::check_call_target(&env, &contract)?;
+
+        // amount 0: a call carries no transfer of its own. Whatever it moves,
+        // it moves through the callee under this vault's authority.
+        let tx_id = Self::store_proposal(&env, proposer, contract.clone(), 0, private_mode);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Call(tx_id), &CallSpec { contract, function, args });
+        Ok(tx_id)
+    }
+
     /// Transparent approval — identity visible.
     pub fn approve(env: Env, tx_id: u64, signer: Address) -> Result<(), Error> {
         signer.require_auth();
@@ -430,6 +501,25 @@ impl VaultInstance {
             if env.ledger().sequence() < unlock {
                 return Err(Error::TimelockActive);
             }
+        }
+
+        // A contract call moves no amount of its own, so the amount-based
+        // guards have nothing to bite on. Its guard is the call allowlist,
+        // re-checked here in case the owner revoked the target meanwhile.
+        if let Some(spec) = env.storage().persistent().get::<_, CallSpec>(&DataKey::Call(tx_id)) {
+            Self::check_call_target(&env, &spec.contract)?;
+            env.invoke_contract::<Val>(&spec.contract, &spec.function, spec.args.clone());
+
+            p.executed = true;
+            env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+            CallExecutedEvent {
+                tx_id,
+                contract: spec.contract,
+                function: spec.function,
+                executed_by: executor,
+            }
+            .publish(&env);
+            return Ok(());
         }
 
         Self::check_limit(&policy, p.amount)?;
@@ -521,6 +611,54 @@ impl VaultInstance {
         env.storage().instance().set(&ALLOWED, &list);
         AllowlistChangedEvent { target, allowed: true }.publish(&env);
         Ok(())
+    }
+
+    /// Let proposals call `contract`. Nothing outside this list is callable.
+    ///
+    /// The vault itself can never be added: a proposal that could call this
+    /// contract's own admin entry points would be able to lift every guard,
+    /// change the signer set or swap the code — turning one passing proposal
+    /// into total control. That is refused here rather than left to the owner's
+    /// judgement.
+    pub fn allow_contract(env: Env, contract: Address) -> Result<(), Error> {
+        Self::require_owner(&env);
+        if contract == env.current_contract_address() {
+            return Err(Error::SelfCallForbidden);
+        }
+        let mut list = Self::call_allowlist(&env);
+        for a in list.iter() {
+            if a == contract {
+                return Ok(());
+            }
+        }
+        if list.len() as u32 >= MAX_ALLOWED {
+            return Err(Error::CallAllowlistFull);
+        }
+        list.push_back(contract.clone());
+        env.storage().instance().set(&CALLOWED, &list);
+        CallTargetChangedEvent { contract, allowed: true }.publish(&env);
+        Ok(())
+    }
+
+    pub fn revoke_contract(env: Env, contract: Address) {
+        Self::require_owner(&env);
+        let mut next = Vec::new(&env);
+        for a in Self::call_allowlist(&env).iter() {
+            if a != contract {
+                next.push_back(a);
+            }
+        }
+        env.storage().instance().set(&CALLOWED, &next);
+        CallTargetChangedEvent { contract, allowed: false }.publish(&env);
+    }
+
+    pub fn get_allowed_contracts(env: Env) -> Vec<Address> {
+        Self::call_allowlist(&env)
+    }
+
+    /// The call a proposal will make, if it is a call rather than a transfer.
+    pub fn get_call(env: Env, tx_id: u64) -> Option<CallSpec> {
+        env.storage().persistent().get(&DataKey::Call(tx_id))
     }
 
     pub fn revoke_recipient(env: Env, target: Address) {
@@ -771,6 +909,23 @@ impl VaultInstance {
             timelock_ledgers: 0,
             allowlist_only: false,
         })
+    }
+
+    fn call_allowlist(env: &Env) -> Vec<Address> {
+        env.storage().instance().get(&CALLOWED).unwrap_or_else(|| Vec::new(env))
+    }
+
+    /// A call target must be explicitly allowed, and can never be this vault.
+    fn check_call_target(env: &Env, contract: &Address) -> Result<(), Error> {
+        if contract == &env.current_contract_address() {
+            return Err(Error::SelfCallForbidden);
+        }
+        for a in Self::call_allowlist(env).iter() {
+            if &a == contract {
+                return Ok(());
+            }
+        }
+        Err(Error::ContractNotAllowed)
     }
 
     fn allowlist(env: &Env) -> Vec<Address> {

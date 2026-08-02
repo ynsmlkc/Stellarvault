@@ -89,6 +89,37 @@ export type BatchItem = { target: string; amount: bigint };
  */
 export type ZkConfig = { verifier: string; vault_id: bigint; signer_root: bigint };
 
+/**
+ * An argument to a contract call. Soroban is typed, so the caller has to say
+ * what each value *is* — there is no inferring `i128` from a string of digits.
+ */
+export type CallArgType = "address" | "i128" | "u32" | "u64" | "bool" | "symbol" | "string";
+export type CallArg = { type: CallArgType; value: string };
+
+/** The call a proposal will make, once it passes. */
+export type CallSpec = { contract: string; function: string; args: unknown[] };
+
+/** Encode one typed argument. Throws on malformed input rather than guessing. */
+function argToScVal(a: CallArg): xdr.ScVal {
+  const v = a.value.trim();
+  switch (a.type) {
+    case "address":
+      return addr(v);
+    case "i128":
+      return i128(BigInt(v));
+    case "u32":
+      return u32(Number(v));
+    case "u64":
+      return u64(BigInt(v));
+    case "bool":
+      return bool(v === "true" || v === "1");
+    case "symbol":
+      return xdr.ScVal.scvSymbol(v);
+    case "string":
+      return str(v);
+  }
+}
+
 /* ---------------- contract errors ---------------- */
 /** Mirrors `Error` in vault-instance/src/lib.rs — keep the codes in sync. */
 const VAULT_ERRORS: Record<number, string> = {
@@ -118,6 +149,9 @@ const VAULT_ERRORS: Record<number, string> = {
   24: "The proof was rejected on-chain — it isn't a valid signer approval.",
   25: "This proof doesn't match this vault and proposal.",
   26: "The proof was malformed (expected 256 bytes).",
+  27: "That contract is not on this vault's call allowlist.",
+  28: "A vault can never call itself — that would let one proposal lift every guard.",
+  29: "The call allowlist is full (50 max).",
 };
 
 /**
@@ -477,6 +511,55 @@ export const allowRecipient = (vaultAddr: string, owner: string, target: string)
 
 export const revokeRecipient = (vaultAddr: string, owner: string, target: string) =>
   invoke(vaultAddr, "revoke_recipient", [addr(target)], owner);
+
+/* ---------------- arbitrary contract calls ---------------- */
+
+/** The call a proposal makes, or null when it is an ordinary transfer. */
+export async function getCall(vaultAddr: string, txId: number): Promise<CallSpec | null> {
+  try {
+    const c = await simulate(vaultAddr, "get_call", [u64(txId)]);
+    if (!c) return null;
+    return { contract: c.contract, function: c.function, args: c.args ?? [] };
+  } catch {
+    return null; // pre-v3 vault, or an ordinary transfer
+  }
+}
+
+/** Contracts this vault is permitted to call. Empty means calls are off. */
+export async function getAllowedContracts(vaultAddr: string): Promise<string[]> {
+  try {
+    return (await simulate(vaultAddr, "get_allowed_contracts", [])) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export const proposeCall = (
+  vaultAddr: string,
+  proposer: string,
+  contract: string,
+  fn: string,
+  args: CallArg[],
+  privateMode: boolean
+) =>
+  invoke(
+    vaultAddr,
+    "propose_call",
+    [
+      addr(proposer),
+      addr(contract),
+      xdr.ScVal.scvSymbol(fn),
+      xdr.ScVal.scvVec(args.map(argToScVal)),
+      bool(privateMode),
+    ],
+    proposer
+  );
+
+export const allowContract = (vaultAddr: string, owner: string, contract: string) =>
+  invoke(vaultAddr, "allow_contract", [addr(contract)], owner);
+
+export const revokeContract = (vaultAddr: string, owner: string, contract: string) =>
+  invoke(vaultAddr, "revoke_contract", [addr(contract)], owner);
 
 /** Batch (multi-call): N payments approved once and executed atomically. */
 export const proposeBatch = (

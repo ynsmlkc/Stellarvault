@@ -87,7 +87,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 2);
+    assert_eq!(s.vault.version(), 3);
 }
 
 #[test]
@@ -502,7 +502,7 @@ fn test_negative_policy_rejected() {
 
 // ------------------------------------------------ on-chain proof enforcement
 
-use soroban_sdk::{contract, contractimpl, symbol_short, BytesN, Symbol};
+use soroban_sdk::{contract, contractimpl, symbol_short, BytesN, IntoVal, Symbol};
 
 const ACCEPT: Symbol = symbol_short!("accept");
 
@@ -700,4 +700,154 @@ fn test_unconfigured_vault_stays_in_unenforced_mode() {
     s.vault.approve_zk(&tx, &s.signer(0), &zk);
     assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
     assert!(s.vault.get_zk_config().is_none());
+}
+
+// ------------------------------------------------- arbitrary contract calls
+
+/// A stand-in for whatever the vault might call — a DEX, a lending market,
+/// another token. Records that it was invoked, and by whom.
+#[contract]
+pub struct Callee;
+
+#[contractimpl]
+impl Callee {
+    pub fn bump(env: Env, by: u32) -> u32 {
+        let k = symbol_short!("n");
+        let n: u32 = env.storage().instance().get(&k).unwrap_or(0);
+        env.storage().instance().set(&k, &(n + by));
+        n + by
+    }
+    pub fn count(env: Env) -> u32 {
+        env.storage().instance().get(&symbol_short!("n")).unwrap_or(0)
+    }
+}
+
+fn callee(s: &Setup) -> Address {
+    s.env.register(Callee, ())
+}
+
+#[test]
+fn test_call_requires_an_allowlisted_target() {
+    let s = setup(1);
+    let c = callee(&s);
+    // nothing is callable until the owner says so
+    assert_eq!(
+        s.vault.try_propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false),
+        Err(Ok(Error::ContractNotAllowed))
+    );
+    assert_eq!(s.vault.get_allowed_contracts().len(), 0);
+}
+
+#[test]
+fn test_allowed_call_executes_as_the_vault() {
+    let s = setup(1);
+    let c = callee(&s);
+    s.vault.allow_contract(&c);
+
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 5u32.into_val(&s.env)], &false);
+    let spec = s.vault.get_call(&tx).unwrap();
+    assert_eq!(spec.contract, c);
+
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+
+    assert_eq!(CalleeClient::new(&s.env, &c).count(), 5, "the call actually ran");
+    assert!(s.vault.get_proposal(&tx).executed);
+}
+
+/// The reason the vault can never be its own call target. A proposal that could
+/// call this contract's admin entry points would be able to lift every guard,
+/// rewrite the signer set, or swap the code — one passing proposal becoming
+/// total control. Refused at both ends.
+#[test]
+fn test_vault_can_never_call_itself() {
+    let s = setup(1);
+    assert_eq!(
+        s.vault.try_allow_contract(&s.vault_addr),
+        Err(Ok(Error::SelfCallForbidden))
+    );
+    assert_eq!(
+        s.vault.try_propose_call(&s.signer(0), &s.vault_addr, &Symbol::new(&s.env, "set_policy"), &Vec::new(&s.env), &false),
+        Err(Ok(Error::SelfCallForbidden))
+    );
+}
+
+#[test]
+fn test_revoking_a_target_blocks_a_pending_call() {
+    let s = setup(1);
+    let c = callee(&s);
+    s.vault.allow_contract(&c);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    s.vault.revoke_contract(&c);
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ContractNotAllowed))
+    );
+    assert_eq!(CalleeClient::new(&s.env, &c).count(), 0, "nothing ran");
+}
+
+#[test]
+fn test_call_still_needs_the_threshold_and_respects_the_timelock() {
+    let s = setup(2);
+    let c = callee(&s);
+    s.vault.allow_contract(&c);
+    s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
+
+    s.env.ledger().set_sequence_number(200);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::ThresholdNotMet)));
+
+    s.vault.approve(&tx, &s.signer(1));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::TimelockActive)));
+
+    s.env.ledger().set_sequence_number(210);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(CalleeClient::new(&s.env, &c).count(), 1);
+}
+
+#[test]
+fn test_call_proposal_can_be_cancelled_and_not_replayed() {
+    let s = setup(1);
+    let c = callee(&s);
+    s.vault.allow_contract(&c);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+    s.vault.cancel(&tx, &s.signer(0));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::AlreadyCancelled)));
+
+    // and an executed call cannot run twice
+    let tx2 = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 2u32.into_val(&s.env)], &false);
+    s.vault.approve(&tx2, &s.signer(0));
+    s.vault.execute(&tx2, &s.signer(0));
+    assert_eq!(s.vault.try_execute(&tx2, &s.signer(0)), Err(Ok(Error::AlreadyExecuted)));
+    assert_eq!(CalleeClient::new(&s.env, &c).count(), 2);
+}
+
+/// Multi-asset falls out of this: a token the vault was not created with is
+/// just another contract to call.
+#[test]
+fn test_call_moves_a_token_the_vault_was_not_created_with() {
+    let s = setup(1);
+    let admin = Address::generate(&s.env);
+    let other = s.env.register_stellar_asset_contract_v2(admin.clone());
+    let other_token = TokenClient::new(&s.env, &other.address());
+    StellarAssetClient::new(&s.env, &other.address()).mint(&s.vault_addr, &1_000);
+
+    s.vault.allow_contract(&other.address());
+    let recipient = Address::generate(&s.env);
+    let tx = s.vault.propose_call(
+        &s.signer(0),
+        &other.address(),
+        &Symbol::new(&s.env, "transfer"),
+        &vec![&s.env, s.vault_addr.into_val(&s.env), recipient.into_val(&s.env), 400i128.into_val(&s.env)],
+        &false,
+    );
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+
+    assert_eq!(other_token.balance(&recipient), 400);
+    assert_eq!(other_token.balance(&s.vault_addr), 600);
 }
