@@ -7,7 +7,10 @@ export const CONFIG = {
   tokenId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
   poolId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",
   shieldPoolId: process.env.NEXT_PUBLIC_SHIELD_POOL_ID ?? "",
+  /** Nethermind's verifier — explored in Faz 4, keyed to their circuit, unused. */
   verifierId: process.env.NEXT_PUBLIC_VERIFIER_CONTRACT_ID ?? "",
+  /** Our Groth16 verifier, keyed to voteApproval.circom. */
+  groth16VerifierId: process.env.NEXT_PUBLIC_GROTH16_VERIFIER_ID ?? "",
   network: process.env.NEXT_PUBLIC_NETWORK ?? "testnet",
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",
 };

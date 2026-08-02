@@ -27,6 +27,7 @@ const addr = (a: string) => new Address(a).toScVal();
 const bool = (b: boolean) => nativeToScVal(b);
 const str = (s: string) => nativeToScVal(s, { type: "string" });
 const addrVec = (xs: string[]) => xdr.ScVal.scvVec(xs.map((a) => new Address(a).toScVal()));
+const u256 = (n: bigint) => nativeToScVal(n, { type: "u256" });
 /** One field of a struct. Soroban expects struct fields in symbol order. */
 const entry = (k: string, v: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
 
@@ -81,6 +82,13 @@ export type ProposalStatus = {
 
 export type BatchItem = { target: string; amount: bigint };
 
+/**
+ * A vault's on-chain proof settings. `vault_id` and `signer_root` are the
+ * public inputs the vault pins down, so a proof for another vault — or against
+ * a signer set the owner never published — is refused.
+ */
+export type ZkConfig = { verifier: string; vault_id: bigint; signer_root: bigint };
+
 /* ---------------- contract errors ---------------- */
 /** Mirrors `Error` in vault-instance/src/lib.rs — keep the codes in sync. */
 const VAULT_ERRORS: Record<number, string> = {
@@ -107,6 +115,9 @@ const VAULT_ERRORS: Record<number, string> = {
   21: "That address is not a signer.",
   22: "A batch needs at least one payment.",
   23: "A batch can hold at most 20 payments.",
+  24: "The proof was rejected on-chain — it isn't a valid signer approval.",
+  25: "This proof doesn't match this vault and proposal.",
+  26: "The proof was malformed (expected 256 bytes).",
 };
 
 /**
@@ -260,6 +271,33 @@ export async function getAllowed(vaultAddr: string): Promise<string[]> {
   }
 }
 
+/**
+ * The vault's on-chain ZK settings, or null when it does not verify proofs.
+ * Null is the honest answer for every vault deployed before enforcement
+ * existed — the UI says so rather than implying the proofs are checked.
+ */
+export async function getZkConfig(vaultAddr: string): Promise<ZkConfig | null> {
+  try {
+    const c = await simulate(vaultAddr, "get_zk_config", []);
+    if (!c) return null;
+    return {
+      verifier: c.verifier,
+      vault_id: BigInt(c.vault_id),
+      signer_root: BigInt(c.signer_root),
+    };
+  } catch {
+    return null; // pre-enforcement vault: no such entry point
+  }
+}
+
+export const setZkConfig = (
+  vaultAddr: string,
+  owner: string,
+  verifier: string,
+  vaultId: bigint,
+  signerRoot: bigint
+) => invoke(vaultAddr, "set_zk_config", [addr(verifier), u256(vaultId), u256(signerRoot)], owner);
+
 /** Amount already spent in the vault's current cap window. */
 export async function getSpentInWindow(vaultAddr: string): Promise<bigint> {
   try {
@@ -377,10 +415,20 @@ function fieldTo32(dec: string): Uint8Array {
   for (let i = 0; i < 32; i++) out[i] = parseInt(h.substr(i * 2, 2), 16);
   return out;
 }
+/**
+ * Pack a snarkjs proof into the 256 bytes the BN254 host functions expect:
+ * `a (64) || b (128) || c (64)`.
+ *
+ * The G2 element is the trap. snarkjs stores each Fp2 coordinate as
+ * `[c0, c1]` — real part first — while the host wants `be(c1) || be(c0)`,
+ * imaginary part first. Emitting them in snarkjs order builds a verifier that
+ * silently rejects every valid proof, which is a miserable thing to debug.
+ */
 function proofTo256(proof: any): Uint8Array {
   const parts = [
     proof.pi_a[0], proof.pi_a[1],
-    proof.pi_b[0][0], proof.pi_b[0][1], proof.pi_b[1][0], proof.pi_b[1][1],
+    // b: x_c1, x_c0, y_c1, y_c0  (each snarkjs pair reversed)
+    proof.pi_b[0][1], proof.pi_b[0][0], proof.pi_b[1][1], proof.pi_b[1][0],
     proof.pi_c[0], proof.pi_c[1],
   ];
   const out = new Uint8Array(256);
@@ -443,7 +491,6 @@ export const depositToVault = (vaultAddr: string, from: string, amountStroops: b
   invoke(CONFIG.tokenId, "transfer", [addr(from), addr(vaultAddr), i128(amountStroops)], from);
 
 /* ---------------- shield pool (confidential transfer) ---------------- */
-const u256 = (n: bigint) => nativeToScVal(n, { type: "u256" });
 
 /** Deposit `amount` into the shield pool, registering a note `commitment`. */
 export const poolDeposit = (from: string, amountStroops: bigint, commitment: bigint) =>

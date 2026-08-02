@@ -63,9 +63,32 @@ function merklePath(layers: bigint[][], index: number) {
   return { pathElements, pathIndices };
 }
 
+/**
+ * The signer commitments for a vault, derived deterministically from the signer
+ * addresses and the vault's domain id.
+ *
+ * The owner publishes the root of these on-chain and the prover proves
+ * membership in the same tree, so both sides MUST derive them identically —
+ * hence one function rather than two call sites that happen to agree today.
+ */
+export async function signerCommitments(signers: string[], vaultId: bigint): Promise<bigint[]> {
+  const out: bigint[] = [];
+  for (let i = 0; i < signers.length; i++) {
+    const secret = await secretFromSeed(signers[i]);
+    out.push(await H([secret, vaultId, BigInt(i + 1)])); // blinding = i + 1
+  }
+  return out;
+}
+
+/** The Merkle root the vault should pin via `set_zk_config`. */
+export async function signerRoot(signers: string[], vaultId: bigint): Promise<bigint> {
+  const tree = await buildTree(await signerCommitments(signers, vaultId));
+  return tree.root;
+}
+
 export type VoteProof = {
   proof: any;
-  publicSignals: string[]; // [vaultId, txHash, signerRoot, nullifier]
+  publicSignals: string[]; // [vaultId, txId, signerRoot, nullifier]
   nullifier: bigint;
   root: bigint;
   ms: number;
@@ -78,6 +101,12 @@ export type VoteProof = {
  */
 export async function generateVoteProof(params: {
   vaultId: bigint;
+  /**
+   * The proposal id, as a field element. It is a *public input the prover
+   * chooses*, and the nullifier is derived from it — so the vault checks it
+   * against the proposal actually being approved. Passing anything else here
+   * produces a proof the contract will refuse.
+   */
   txHash: bigint;
   secrets: bigint[];
   blindings: bigint[];

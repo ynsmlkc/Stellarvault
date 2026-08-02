@@ -27,6 +27,8 @@ import {
   getAllowed,
   getSpentInWindow,
   getStatus,
+  getZkConfig,
+  setZkConfig as setZkConfigTx,
   setPolicy as setPolicyTx,
   allowRecipient,
   revokeRecipient,
@@ -37,8 +39,9 @@ import {
   type Policy,
   type ProposalStatus,
   type BatchItem,
+  type ZkConfig,
 } from "@/lib/contract";
-import { generateVoteProof, verifyVoteProof, secretFromSeed, H } from "@/lib/prover";
+import { generateVoteProof, verifyVoteProof, secretFromSeed, signerRoot } from "@/lib/prover";
 import Shield from "./shield";
 
 /* ============================ tokens ============================ */
@@ -128,18 +131,21 @@ export default function Page() {
   const [allowed, setAllowed] = useState<string[]>([]);
   const [spent, setSpent] = useState<bigint>(0n);
   const [statuses, setStatuses] = useState<Record<number, ProposalStatus>>({});
+  // null = this vault does not verify proofs on-chain
+  const [zkConfig, setZkConfigState] = useState<ZkConfig | null>(null);
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p, pol, allow, sp] = await Promise.all([
+      const [c, b, p, pol, allow, sp, zk] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
         getPolicy(addr),
         getAllowed(addr),
         getSpentInWindow(addr),
+        getZkConfig(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -147,6 +153,7 @@ export default function Page() {
       setPolicy(pol);
       setAllowed(allow);
       setSpent(sp);
+      setZkConfigState(zk);
 
       // guard state per proposal (time-lock, cancellation) — a pre-guards vault
       // returns null for every one of these and the UI simply falls back
@@ -298,8 +305,12 @@ export default function Page() {
     try {
       const secrets = await Promise.all(config.signers.map((a) => secretFromSeed(a)));
       const blindings = config.signers.map((_, i) => BigInt(i + 1));
-      const vId = await secretFromSeed(vaultAddress); // circuit domain id derived from the vault address
-      const txHash = await H([vId, BigInt(txId)]);
+
+      // When the vault verifies on-chain it dictates the domain id, and the
+      // proposal id IS the second public input — the contract checks both. A
+      // vault that doesn't verify keeps deriving the id from its address.
+      const vId = zkConfig ? zkConfig.vault_id : await secretFromSeed(vaultAddress);
+      const txHash = BigInt(txId);
 
       setProofStage(1); // generating proof
       const vp = await generateVoteProof({ vaultId: vId, txHash, secrets, blindings, myIndex });
@@ -450,6 +461,38 @@ export default function Page() {
     }
   };
 
+  /**
+   * Turn on on-chain proof verification: derive this vault's domain id and the
+   * Merkle root of its signer commitments, then publish both. From here the
+   * contract refuses any proof that isn't against this exact signer set, for
+   * this exact vault and proposal.
+   */
+  const doEnableZk = async () => {
+    const w = requireWallet();
+    if (!w) return;
+    if (!config) return;
+    if (!CONFIG.groth16VerifierId) {
+      showToast({ title: "No verifier configured", sub: "NEXT_PUBLIC_GROTH16_VERIFIER_ID is unset.", tone: "err" });
+      return;
+    }
+    setBusy("zk");
+    try {
+      const vId = await secretFromSeed(vaultAddress);
+      const root = await signerRoot(config.signers, vId);
+      await setZkConfigTx(vaultAddress, w, CONFIG.groth16VerifierId, vId, root);
+      refreshSoon();
+      showToast({
+        title: "On-chain verification enabled",
+        sub: "Approvals are now checked against a real Groth16 proof.",
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Couldn't enable verification", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards";
 
   return (
@@ -459,9 +502,9 @@ export default function Page() {
       {isApp && (
         <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} wallet={wallet}
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          policy={policy} allowed={allowed} spent={spent} statuses={statuses}
+          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} />
+          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onEnableZk={doEnableZk} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -726,9 +769,9 @@ type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
   submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
-  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void;
+  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -763,9 +806,9 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onEnableZk={p.onEnableZk} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
     </div>
@@ -962,9 +1005,9 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1082,7 +1125,14 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
             {policy.spending_cap > 0n && <CapMeter spent={spent} cap={policy.spending_cap} />}
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(236,231,221,0.05)" }}>
               <PolicyRow label="Token" value="XLM (SAC)" />
-              <PolicyRow label="ZK mode" valueNode={<span style={{ color: "#C9A86A" }}>Enabled · Groth16</span>} />
+              <PolicyRow
+                label="ZK proofs"
+                valueNode={
+                  zkConfig
+                    ? <span style={{ color: "#7FB069" }}>Verified on-chain</span>
+                    : <span style={{ color: "#8A857B" }}>Recorded, not verified</span>
+                }
+              />
             </div>
           </div>
         </div>
@@ -1449,10 +1499,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, onSave, onAllowRecipient }: {
+function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, onSave, onAllowRecipient, onEnableZk }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
-  policy: Policy; allowed: string[]; spent: bigint; busy: string | null;
-  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void;
+  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null;
+  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void;
 }) {
   const isOwner = !!wallet && wallet === config?.owner;
   const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
@@ -1572,6 +1622,41 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, onSave, onAl
               style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) ? 1 : 0.45 }}
             >Allow</button>
           </div>
+        )}
+      </div>
+
+      <div style={{ ...card, borderColor: zkConfig ? "rgba(127,176,105,0.3)" : "rgba(236,231,221,0.08)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>On-chain proof verification</div>
+          <span style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".12em", color: zkConfig ? "#7FB069" : "#C45D4A", border: `1px solid ${zkConfig ? "rgba(127,176,105,0.4)" : "rgba(196,93,74,0.35)"}`, borderRadius: 6, padding: "3px 8px" }}>
+            {zkConfig ? "ENFORCED" : "NOT ENFORCED"}
+          </span>
+        </div>
+        {zkConfig ? (
+          <>
+            <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+              Every ZK approval is verified by a Groth16 verifier contract, and its public inputs are pinned to this vault, this signer set and the specific proposal. A proof for another vault, or against a signer set you never published, is refused.
+            </p>
+            <PolicyRow label="Verifier" valueNode={<span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{shortAddr(zkConfig.verifier, 6, 5)}</span>} />
+            <PolicyRow label="Vault domain id" valueNode={<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A857B" }}>0x{zkConfig.vault_id.toString(16).slice(0, 14)}…</span>} />
+            <PolicyRow label="Signer root" valueNode={<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A857B" }}>0x{zkConfig.signer_root.toString(16).slice(0, 14)}…</span>} />
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+              This vault records the nullifier of a ZK approval but does not check the proof, so the anonymity is real while the guarantee is not. Publishing your signer set turns on real verification.
+            </p>
+            {isOwner ? (
+              <button onClick={onEnableZk} disabled={busy === "zk"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "zk" ? 0.6 : 1 }}>
+                {busy === "zk" ? "Publishing signer set…" : "Enable on-chain verification"}
+              </button>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only the owner can turn this on.</div>
+            )}
+            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
+              Changing signers afterwards means republishing the root, or their proofs stop verifying.
+            </p>
+          </>
         )}
       </div>
 

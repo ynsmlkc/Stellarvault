@@ -65,7 +65,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
 | **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
 | **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
-| **On-chain Groth16 verify**                     | 🚧 **Roadmap**           | proofs are real & browser-verified today; an on-chain verifier keyed to our circuits is the production hardening step — now unblocked by the Jan-2026 "X-Ray" upgrade (BN254 + Poseidon host functions on Soroban)    |
+| **On-chain Groth16 verify**                     | ✅ **Live on testnet**   | a verifier contract keyed to **our** circuit's vk checks every ZK approval, and the vault pins all four public inputs to itself, its published signer set and the specific proposal — so anonymity is now a guarantee, not a convention |
 
 > **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
 
@@ -112,6 +112,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | Contract                                               | ID                                                         |
 | ------------------------------------------------------ | ---------------------------------------------------------- |
 | **Vault Factory** (deploys one contract per vault)     | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
+| **Groth16 verifier** (keyed to our voteApproval circuit) | `CDAG3Y7JS52WCIOWO37FDXVTS5WQBSCRNPO42NRSKV53LYQQTPWH3GLB` |
 | **Shield Pool** (our confidential layer)               | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
 | Token (XLM SAC)                                        | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
 | Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…`                                  |
@@ -126,8 +127,9 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 29 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 24 pass (multi-sig vault + guards)
+# 45 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 34 pass (multi-sig vault + guards + zk)
+cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
 cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
 cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
 
@@ -165,8 +167,23 @@ Connect **Freighter** (Testnet, friendbot-funded), then:
 2. **Binding** — the vote is tied to this exact `(vaultId, txHash)`.
 3. **Nullifier** — `Poseidon(commitment, txHash)` is a unique, one-way tag → double-voting is detectable, identity is **not** recoverable.
 
-Public inputs: `[vaultId, txHash, signerRoot, nullifier]`. Everything else is private.
-Proofs are generated **in the browser** with snarkjs (~0.3s) and the nullifier is submitted on-chain via `approve_zk`, where the `ZKApprovalEvent` emits **only the nullifier** — never the signer.
+Public inputs: `[vaultId, txId, signerRoot, nullifier]`. Everything else is private.
+Proofs are generated **in the browser** with snarkjs (~0.3s), and `approve_zk` **verifies them on-chain** through [`groth16-verifier`](groth16-verifier/) before counting the approval. The `ZKApprovedEvent` emits **only the nullifier** — never the signer.
+
+### Why verifying the proof was not enough
+
+The nullifier is `Poseidon(commitment, txId)` and `txId` is a public input **the prover chooses**. A contract that verified the proof but left `txId` unbound would still be broken: one signer could pick arbitrary `txId` values, produce a valid proof for each, and get a fresh nullifier every time — every approval individually valid, every one passing the double-vote check — and approve a single proposal until the threshold was met, alone.
+
+So the vault pins every public input to something it already knows:
+
+| Public input | Checked against |
+| ------------ | --------------- |
+| `vaultId`    | this vault's domain id |
+| `txId`       | the proposal being approved |
+| `signerRoot` | the root the owner published via `set_zk_config` |
+| `nullifier`  | the nullifier being recorded |
+
+None of the four is the prover's to choose. `get_zk_config()` returning `None` is the honest signal that a vault predates enforcement and only records nullifiers.
 
 ---
 
@@ -206,7 +223,6 @@ Every rejection is a **typed contract error**, so the UI can say *"Time-locked �
 Because each vault is a programmable smart contract (not native multi-sig), it's the right foundation for Gnosis-Safe-style extensibility — things native multi-sig structurally can't add:
 
 - **More Safe-style modules** — role-based access (proposer / approver / executor), session keys, social recovery, transaction simulation before signing. The first wave — spending limits, rolling caps, time-locks, a recipient allowlist and batched multi-call — is **already live** (see the status table).
-- **On-chain Groth16 verifier** — deploy a verifier keyed to our circuits' VK + bind the signer Merkle root in the vault (now unblocked by the X-Ray BN254/Poseidon host functions).
 - **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the on-chain event already hides it).
 - **Confidential execution inside the vault** — wire the shielded pool directly into a private `execute` so amount + recipient are hidden by default.
 - DeFi integrations, mobile, production audit.
