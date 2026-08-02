@@ -38,6 +38,8 @@ const ALLOWED: Symbol = symbol_short!("allowed");
 const CALLOWED: Symbol = symbol_short!("callowed");
 /// Holds the whole [`ZkConfig`]; absent means this vault does not verify proofs.
 const VERIFIER: Symbol = symbol_short!("verifier");
+/// Shuffled signer commitments — the Merkle leaves a prover needs.
+const COMMITS: Symbol = symbol_short!("commits");
 
 /// Contract code version, so the dashboard can tell what a vault can do:
 ///   1 — pre-guards (no `version` entry point at all)
@@ -697,6 +699,27 @@ impl VaultInstance {
     /// verify proofs on-chain.
     pub fn get_zk_config(env: Env) -> Option<ZkConfig> {
         env.storage().instance().get(&VERIFIER)
+    }
+
+    /// Publish the signer commitments the Merkle tree is built from.
+    ///
+    /// A prover needs every leaf to build its membership path, so this list is
+    /// necessarily public. What must NOT be public is which leaf belongs to
+    /// whom: given that mapping, anyone could compute `Poseidon(leaf, txId)`
+    /// for each signer and match it against the nullifier an approval
+    /// published — recovering the approver in as many guesses as there are
+    /// signers.
+    ///
+    /// So the owner publishes these **shuffled**, in an order unrelated to the
+    /// signer list. Each signer recognises their own commitment; nobody else
+    /// can attribute any of them.
+    pub fn set_signer_commitments(env: Env, commitments: Vec<U256>) {
+        Self::require_owner(&env);
+        env.storage().instance().set(&COMMITS, &commitments);
+    }
+
+    pub fn get_signer_commitments(env: Env) -> Vec<U256> {
+        env.storage().instance().get(&COMMITS).unwrap_or_else(|| Vec::new(&env))
     }
 
     // ---------------- admin (owner) ----------------

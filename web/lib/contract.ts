@@ -324,6 +324,18 @@ export async function getZkConfig(vaultAddr: string): Promise<ZkConfig | null> {
   }
 }
 
+/** The published (shuffled) Merkle leaves a prover needs to build its path. */
+export async function getSignerCommitments(vaultAddr: string): Promise<bigint[]> {
+  try {
+    return ((await simulate(vaultAddr, "get_signer_commitments", [])) ?? []).map((x: any) => BigInt(x));
+  } catch {
+    return [];
+  }
+}
+
+export const setSignerCommitments = (vaultAddr: string, owner: string, commitments: bigint[]) =>
+  invoke(vaultAddr, "set_signer_commitments", [xdr.ScVal.scvVec(commitments.map(u256))], owner);
+
 export const setZkConfig = (
   vaultAddr: string,
   owner: string,
