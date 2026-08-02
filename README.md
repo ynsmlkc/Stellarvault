@@ -65,6 +65,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
 | **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
 | **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
+| **Arbitrary contract calls**                    | ✅ **Live on testnet**   | a proposal can call any allowlisted contract — swap on a DEX, supply to a lending market, move an asset the vault wasn't created with. Multi-asset falls out of it; the vault can never call itself |
 | **On-chain Groth16 verify**                     | ✅ **Live on testnet**   | a verifier contract keyed to **our** circuit's vk checks every ZK approval, and the vault pins all four public inputs to itself, its published signer set and the specific proposal — so anonymity is now a guarantee, not a convention |
 
 > **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
@@ -127,8 +128,8 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 45 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 34 pass (multi-sig vault + guards + zk)
+# 52 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 41 pass (vault + guards + zk + calls)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
 cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
 cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
@@ -222,7 +223,8 @@ Every rejection is a **typed contract error**, so the UI can say *"Time-locked �
 
 Because each vault is a programmable smart contract (not native multi-sig), it's the right foundation for Gnosis-Safe-style extensibility — things native multi-sig structurally can't add:
 
-- **More Safe-style modules** — role-based access (proposer / approver / executor), session keys, social recovery, transaction simulation before signing. The first wave — spending limits, rolling caps, time-locks, a recipient allowlist and batched multi-call — is **already live** (see the status table).
+- **More Safe-style modules** — role-based access (proposer / approver / executor), session keys, social recovery, transaction simulation before signing. Spending limits, rolling caps, time-locks, a recipient allowlist, batched multi-call and **arbitrary contract calls** are **already live** (see the status table).
+- **Off-chain approval collection** — today each approval is its own transaction; Safe collects signatures off-chain and submits one. A real cost and UX difference.
 - **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the on-chain event already hides it).
 - **Confidential execution inside the vault** — wire the shielded pool directly into a private `execute` so amount + recipient are hidden by default.
 - DeFi integrations, mobile, production audit.
