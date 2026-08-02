@@ -28,6 +28,11 @@ import {
   getSpentInWindow,
   getStatus,
   getZkConfig,
+  getCall,
+  getAllowedContracts,
+  proposeCall,
+  allowContract,
+  revokeContract,
   setZkConfig as setZkConfigTx,
   setPolicy as setPolicyTx,
   allowRecipient,
@@ -40,6 +45,9 @@ import {
   type ProposalStatus,
   type BatchItem,
   type ZkConfig,
+  type CallArg,
+  type CallArgType,
+  type CallSpec,
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerRoot } from "@/lib/prover";
 import Shield from "./shield";
@@ -133,12 +141,14 @@ export default function Page() {
   const [statuses, setStatuses] = useState<Record<number, ProposalStatus>>({});
   // null = this vault does not verify proofs on-chain
   const [zkConfig, setZkConfigState] = useState<ZkConfig | null>(null);
+  const [allowedContracts, setAllowedContracts] = useState<string[]>([]);
+  const [calls, setCalls] = useState<Record<number, CallSpec>>({});
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p, pol, allow, sp, zk] = await Promise.all([
+      const [c, b, p, pol, allow, sp, zk, callTargets] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
@@ -146,6 +156,7 @@ export default function Page() {
         getAllowed(addr),
         getSpentInWindow(addr),
         getZkConfig(addr),
+        getAllowedContracts(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -154,6 +165,7 @@ export default function Page() {
       setAllowed(allow);
       setSpent(sp);
       setZkConfigState(zk);
+      setAllowedContracts(callTargets);
 
       // guard state per proposal (time-lock, cancellation) — a pre-guards vault
       // returns null for every one of these and the UI simply falls back
@@ -163,6 +175,14 @@ export default function Page() {
         if (st[i]) map[x.id] = st[i]!;
       });
       setStatuses(map);
+
+      // which proposals are contract calls rather than transfers
+      const cs = await Promise.all(p.map((x) => getCall(addr, x.id)));
+      const callMap: Record<number, CallSpec> = {};
+      p.forEach((x, i) => {
+        if (cs[i]) callMap[x.id] = cs[i]!;
+      });
+      setCalls(callMap);
     } catch (e) {
       // leave nulls; UI falls back to skeleton/empty
     } finally {
@@ -427,6 +447,48 @@ export default function Page() {
     }
   };
 
+  /** Propose a call to another contract — a swap, a supply, another asset. */
+  const submitCall = async (contract: string, fn: string, args: CallArg[]) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy("propose");
+    try {
+      await proposeCall(vaultAddress, w, contract.trim(), fn.trim(), args, mode === "private");
+      await loadData();
+      go("vault");
+      showToast({
+        title: "Contract call proposed",
+        sub: `${fn.trim()}() on ${shortAddr(contract.trim(), 6, 4)} — the vault will call it as itself.`,
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Couldn't propose the call", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doAllowContract = async (contract: string, allow: boolean) => {
+    const w = requireWallet();
+    if (!w) return;
+    setBusy(`callee-${contract}`);
+    try {
+      await (allow ? allowContract : revokeContract)(vaultAddress, w, contract);
+      refreshSoon();
+      showToast({
+        title: allow ? "Contract allowed" : "Contract revoked",
+        sub: allow
+          ? "Proposals may now call it."
+          : "Pending calls to it can no longer execute.",
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Call allowlist update failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const doSavePolicy = async (next: Policy) => {
     const w = requireWallet();
     if (!w) return;
@@ -500,11 +562,11 @@ export default function Page() {
       {screen === "landing" && <Landing onConnect={() => go("connect")} onVault={() => go("connect")} balance={balance} />}
       {screen === "connect" && <Connect onBack={() => go("landing")} onConnect={handleConnect} connecting={connecting} />}
       {isApp && (
-        <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} wallet={wallet}
+        <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} submitCall={submitCall} wallet={wallet}
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig}
+          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onEnableZk={doEnableZk} />
+          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onEnableZk={doEnableZk} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -767,11 +829,11 @@ function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConn
 /* ============================ APP SHELL ============================ */
 type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
-  submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; wallet: string | null; vaultAddress: string;
+  submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; submitCall: (contract: string, fn: string, args: CallArg[]) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
-  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void;
+  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -806,9 +868,9 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
-        {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onEnableZk={p.onEnableZk} />}
+        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onEnableZk={p.onEnableZk} onAllowContract={p.onAllowContract} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
     </div>
@@ -1005,9 +1067,9 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1080,6 +1142,7 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
               const shared = {
                 p, threshold, busy,
                 st: statuses[p.id],
+                call: calls[p.id],
                 blocker: executeBlocker(p, statuses[p.id], policy, balance),
                 canCancel: !!wallet && (wallet === p.proposer || wallet === config?.owner),
                 onCancel,
@@ -1222,10 +1285,10 @@ function ApprovalDots({ count, threshold, gold }: { count: number; threshold: nu
 
 type TxCardProps = {
   p: Proposal; threshold: number; busy: string | null; iApproved: boolean;
-  st?: ProposalStatus; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
+  st?: ProposalStatus; call?: CallSpec; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
 };
 
-function TransparentTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1233,13 +1296,15 @@ function TransparentTx({ p, threshold, busy, iApproved, st, blocker, canCancel, 
     <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#C9A86A" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{st?.is_batch && <BatchBadge />}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>proposal #{p.id}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
-        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
+        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+        {call
+          ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+          : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
         {p.executed
@@ -1263,11 +1328,15 @@ function TransparentTx({ p, threshold, busy, iApproved, st, blocker, canCancel, 
   );
 }
 
+function CallBadge() {
+  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>CALL</span>;
+}
+
 function BatchBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
-function PrivateTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1276,13 +1345,15 @@ function PrivateTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCa
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
       <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK{st?.is_batch && <BatchBadge />}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Recipient</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
-        <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>
+        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+        {call
+          ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+          : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
       </div>
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
@@ -1307,16 +1378,30 @@ function PrivateTx({ p, threshold, busy, iApproved, st, blocker, canCancel, onCa
 }
 
 /* ============================ PROPOSE ============================ */
-function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance, policy, allowed, spent }: {
+function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, busy, balance, policy, allowed, spent, allowedContracts }: {
   go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
   submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void;
-  busy: string | null; balance: bigint | null; policy: Policy; allowed: string[]; spent: bigint;
+  submitCall: (contract: string, fn: string, args: CallArg[]) => void;
+  busy: string | null; balance: bigint | null; policy: Policy; allowed: string[]; spent: bigint; allowedContracts: string[];
 }) {
   const isPrivate = mode === "private";
   const [target, setTarget] = useState("");
   const [amount, setAmount] = useState("");
-  const [batchMode, setBatchMode] = useState(false);
+  const [kind, setKind] = useState<"single" | "batch" | "call">("single");
+  const batchMode = kind === "batch";
   const [rows, setRows] = useState<{ target: string; amount: string }[]>([{ target: "", amount: "" }]);
+
+  // contract-call form
+  const [callTarget, setCallTarget] = useState("");
+  const [callFn, setCallFn] = useState("");
+  const [callArgs, setCallArgs] = useState<CallArg[]>([]);
+  const setArgAt = (i: number, patch: Partial<CallArg>) =>
+    setCallArgs((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const callTargetAllowed = allowedContracts.includes(callTarget.trim());
+  const callReady =
+    /^C[A-Z2-7]{55}$/.test(callTarget.trim()) &&
+    /^[a-zA-Z_][a-zA-Z0-9_]{0,31}$/.test(callFn.trim()) &&
+    callArgs.every((a) => a.value.trim().length > 0);
 
   const validAddr = (a: string) => /^[GC][A-Z2-7]{55}$/.test(a.trim());
   const rowAmount = (s: string) => {
@@ -1346,7 +1431,8 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
     setRows((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
   const submit = () => {
-    if (!batchMode) return submitPropose(target, amount);
+    if (kind === "call") return submitCall(callTarget, callFn, callArgs);
+    if (kind === "single") return submitPropose(target, amount);
     submitBatch(rows.map((r) => ({ target: r.target.trim(), amount: stroopsFromXlm(r.amount) })));
   };
 
@@ -1371,12 +1457,52 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start" }}>
         <div style={{ border: `1px solid ${isPrivate ? "rgba(236,231,221,0.1)" : "rgba(201,168,106,0.24)"}`, borderRadius: 15, background: isPrivate ? "#0d0d0d" : "linear-gradient(180deg,#15140f,#111110)", padding: 28, transition: "border-color .3s,background .3s" }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 22 }}>
-            {([["Single payment", false], ["Batch · multi-call", true]] as const).map(([label, v]) => (
-              <button key={label} onClick={() => setBatchMode(v)} style={{ flex: 1, background: batchMode === v ? "rgba(201,168,106,0.12)" : "transparent", border: `1px solid ${batchMode === v ? "rgba(201,168,106,0.45)" : "rgba(236,231,221,0.10)"}`, color: batchMode === v ? "#C9A86A" : "#8A857B", borderRadius: 9, padding: "10px 12px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+            {([["Single payment", "single"], ["Batch", "batch"], ["Contract call", "call"]] as const).map(([label, v]) => (
+              <button key={v} onClick={() => setKind(v)} style={{ flex: 1, background: kind === v ? "rgba(201,168,106,0.12)" : "transparent", border: `1px solid ${kind === v ? "rgba(201,168,106,0.45)" : "rgba(236,231,221,0.10)"}`, color: kind === v ? "#C9A86A" : "#8A857B", borderRadius: 9, padding: "10px 12px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
             ))}
           </div>
 
-          {!batchMode ? (
+          {kind === "call" ? (
+            <>
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Contract</label>
+              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 12, lineHeight: 1.55 }}>
+                The vault calls it <span style={{ color: "#ECE7DD" }}>as itself</span> — a swap, a deposit, or moving an asset this vault wasn&apos;t created with. Only allowlisted contracts can be called.
+              </p>
+              <input value={callTarget} onChange={(e) => setCallTarget(e.target.value)} placeholder="C…" style={{ width: "100%", background: "#0d0d0e", border: `1px solid ${callTarget && !callTargetAllowed ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13, marginBottom: 8 }} />
+              {allowedContracts.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "#C45D4A", marginBottom: 18 }}>
+                  No contracts are allowlisted yet — add one under <span style={{ color: "#C9A86A" }}>Guards</span> before a call can be proposed.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+                  {allowedContracts.map((c) => (
+                    <button key={c} onClick={() => setCallTarget(c)} style={{ background: callTarget.trim() === c ? "rgba(201,168,106,0.12)" : "#0d0d0e", border: `1px solid ${callTarget.trim() === c ? "#C9A86A" : "rgba(236,231,221,0.12)"}`, color: callTarget.trim() === c ? "#C9A86A" : "#8A857B", borderRadius: 7, padding: "6px 10px", fontFamily: MONO, fontSize: 11.5, cursor: "pointer" }}>{shortContract(c)}</button>
+                  ))}
+                </div>
+              )}
+
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Function</label>
+              <input value={callFn} onChange={(e) => setCallFn(e.target.value)} placeholder="transfer" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
+
+              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Arguments</label>
+              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 14, lineHeight: 1.55 }}>
+                Soroban is typed, so each argument needs its type — a number alone doesn&apos;t say whether it&apos;s an <span style={{ fontFamily: MONO }}>i128</span> or a <span style={{ fontFamily: MONO }}>u32</span>. Order must match the function&apos;s signature.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                {callArgs.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", width: 16 }}>{i}</span>
+                    <select value={a.type} onChange={(e) => setArgAt(i, { type: e.target.value as CallArgType })} style={{ background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 9px", color: "#C9A86A", fontFamily: MONO, fontSize: 12.5 }}>
+                      {["address", "i128", "u32", "u64", "bool", "symbol", "string"].map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <input value={a.value} onChange={(e) => setArgAt(i, { value: e.target.value })} placeholder={a.type === "address" ? "G… / C…" : a.type === "bool" ? "true" : "value"} style={{ flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
+                    <button onClick={() => setCallArgs((xs) => xs.filter((_, j) => j !== i))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 18, padding: "0 4px" }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setCallArgs((xs) => [...xs, { type: "address", value: "" }])} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer", marginBottom: 22 }}>+ Add argument</button>
+            </>
+          ) : kind === "single" ? (
             <>
               <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Recipient address</label>
               <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="G…" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
@@ -1407,13 +1533,24 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
             </>
           )}
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#8A857B", marginBottom: 22 }}>
-            <span>Vault balance · {balance != null ? formatXLM(balance) : "—"} XLM</span>
-            {!batchMode && <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>}
-          </div>
+          {kind !== "call" && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#8A857B", marginBottom: 22 }}>
+              <span>Vault balance · {balance != null ? formatXLM(balance) : "—"} XLM</span>
+              {!batchMode && <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>}
+            </div>
+          )}
 
           {/* a refusal and a heads-up are different things — never in the same box */}
-          {guardWarnings.length > 0 && (
+          {kind === "call" && (
+            <div style={{ border: "1px solid rgba(201,168,106,0.22)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 9 }}>HOW GUARDS APPLY HERE</div>
+              <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.65 }}>
+                The threshold and the time-lock still apply. The amount guards don&apos;t — a call carries no amount the vault can read, so <span style={{ color: "#ECE7DD" }}>the allowlist is the guard</span>: it can only call contracts you approved.
+              </div>
+            </div>
+          )}
+
+          {kind !== "call" && guardWarnings.length > 0 && (
             <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 14 }}>
               <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>GUARDS WILL REJECT THIS</div>
               {guardWarnings.map((w) => (
@@ -1421,7 +1558,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
               ))}
             </div>
           )}
-          {timelockNote && (
+          {kind !== "call" && timelockNote && (
             <div style={{ display: "flex", gap: 10, border: "1px solid rgba(201,168,106,0.22)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22 }}>
               <span style={{ color: "#C9A86A", lineHeight: 1.4 }}>⏻</span>
               <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>
@@ -1441,15 +1578,18 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
           {(() => {
             // if we already know a guard will refuse this, don't offer a button
             // that looks live — the contract would reject it anyway
-            const blocked = guardWarnings.length > 0;
-            const disabled = busy === "propose" || blocked || (batchMode && !batchReady);
+            const blocked = kind !== "call" && guardWarnings.length > 0;
+            const disabled =
+              busy === "propose" || blocked || (batchMode && !batchReady) || (kind === "call" && !callReady);
             const label = busy === "propose"
               ? "Proposing…"
               : blocked
                 ? "Blocked by guards"
-                : batchMode
-                  ? `Propose batch of ${rows.length} · sign with wallet`
-                  : "Propose · sign with wallet";
+                : kind === "call"
+                  ? `Propose call · ${callFn.trim() || "function"}()`
+                  : batchMode
+                    ? `Propose batch of ${rows.length} · sign with wallet`
+                    : "Propose · sign with wallet";
             return (
               <button onClick={submit} disabled={disabled} className={blocked ? undefined : "h-goldbtn"} style={{ width: "100%", background: blocked ? "transparent" : "#C9A86A", color: blocked ? "#C45D4A" : "#0A0A0B", border: blocked ? "1px solid rgba(196,93,74,0.4)" : "none", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled && !blocked ? 0.5 : 1 }}>
                 {label}
@@ -1466,8 +1606,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", marginBottom: 18 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label="Recipient" value={batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                kind === "call"
+                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
                 <div style={{ height: 1, background: "rgba(236,231,221,0.08)" }} />
                 <Row label="Approvals" value="visible to all" />
               </div>
@@ -1478,8 +1620,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
               <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🔒 PRIVATE · ZK</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label="Recipient" value={batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                kind === "call"
+                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
@@ -1499,10 +1643,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, busy, balance,
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, onSave, onAllowRecipient, onEnableZk }: {
+function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, onSave, onAllowRecipient, onEnableZk, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
-  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null;
-  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void;
+  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[];
+  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
   const isOwner = !!wallet && wallet === config?.owner;
   const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
@@ -1511,6 +1655,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, on
   const [timelock, setTimelock] = useState(policy.timelock_ledgers);
   const [allowlistOnly, setAllowlistOnly] = useState(policy.allowlist_only);
   const [newRecipient, setNewRecipient] = useState("");
+  const [newCallee, setNewCallee] = useState("");
 
   // the vault is the source of truth — resync whenever a fresh read lands
   useEffect(() => {
@@ -1622,6 +1767,42 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, on
               style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) ? 1 : 0.45 }}
             >Allow</button>
           </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Callable contracts</div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+          Proposals can call these contracts — a DEX, a lending market, another token. Nothing outside the list is callable, and the list starts empty. This is the guard for calls: the amount limits can&apos;t apply, because a call carries no amount the vault can read.
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {allowedContracts.map((c) => (
+            <div key={c} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(c, 8, 6)}</span>
+              {isOwner && (
+                <button onClick={() => onAllowContract(c, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
+              )}
+            </div>
+          ))}
+          {!allowedContracts.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>None — this vault cannot call any contract.</div>}
+        </div>
+
+        {isOwner && (
+          <>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newCallee} onChange={(e) => setNewCallee(e.target.value)} placeholder="C…" style={{ ...input, flex: 1 }} />
+              <button
+                onClick={() => { onAllowContract(newCallee.trim(), true); setNewCallee(""); }}
+                disabled={!/^C[A-Z2-7]{55}$/.test(newCallee.trim()) || !!busy}
+                className="h-goldbtn"
+                style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^C[A-Z2-7]{55}$/.test(newCallee.trim()) ? 1 : 0.45 }}
+              >Allow</button>
+            </div>
+            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
+              The vault itself can never be added — one passing proposal would otherwise be able to lift every guard.
+            </p>
+          </>
         )}
       </div>
 
