@@ -152,6 +152,7 @@ const VAULT_ERRORS: Record<number, string> = {
   27: "That contract is not on this vault's call allowlist.",
   28: "A vault can never call itself — that would let one proposal lift every guard.",
   29: "The call allowlist is full (50 max).",
+  30: "Turn on on-chain verification before approving anonymously.",
 };
 
 /**
@@ -324,6 +325,18 @@ export async function getZkConfig(vaultAddr: string): Promise<ZkConfig | null> {
   }
 }
 
+/** The published (shuffled) Merkle leaves a prover needs to build its path. */
+export async function getSignerCommitments(vaultAddr: string): Promise<bigint[]> {
+  try {
+    return ((await simulate(vaultAddr, "get_signer_commitments", [])) ?? []).map((x: any) => BigInt(x));
+  } catch {
+    return [];
+  }
+}
+
+export const setSignerCommitments = (vaultAddr: string, owner: string, commitments: bigint[]) =>
+  invoke(vaultAddr, "set_signer_commitments", [xdr.ScVal.scvVec(commitments.map(u256))], owner);
+
 export const setZkConfig = (
   vaultAddr: string,
   owner: string,
@@ -479,6 +492,23 @@ export function approveZk(vaultAddr: string, txId: number, signer: string, proof
     entry("public_inputs", xdr.ScVal.scvVec(publicSignals.map((s) => nativeToScVal(fieldTo32(s))))),
   ]);
   return invoke(vaultAddr, "approve_zk", [u64(txId), addr(signer), zkApproval], signer);
+}
+
+/**
+ * Submit a ZK approval with no identifying wallet: the proof is the
+ * authorization. Requires the vault to verify proofs on-chain.
+ *
+ * `submitter` still pays the fee and signs the envelope, so it is whoever
+ * relays this — pass a wallet other than the approver's for the anonymity to
+ * mean anything.
+ */
+export function approveZkAnon(vaultAddr: string, txId: number, submitter: string, proof: any, publicSignals: string[]) {
+  const zkApproval = xdr.ScVal.scvMap([
+    entry("nullifier", nativeToScVal(BigInt(publicSignals[3]), { type: "u256" })),
+    entry("proof", nativeToScVal(proofTo256(proof))),
+    entry("public_inputs", xdr.ScVal.scvVec(publicSignals.map((s) => nativeToScVal(fieldTo32(s))))),
+  ]);
+  return invoke(vaultAddr, "approve_zk_anon", [u64(txId), zkApproval], submitter);
 }
 
 export const execute = (vaultAddr: string, txId: number, executor: string) =>

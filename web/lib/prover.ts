@@ -22,7 +22,48 @@ export async function H(inputs: (bigint | string | number)[]): Promise<bigint> {
   return BigInt(p.F.toString(p(inputs.map((x) => p.F.e(x)))));
 }
 
-/** Deterministic field element from a string seed (e.g. a wallet signature). */
+/**
+ * The message a signer signs to derive their signing key for a vault.
+ *
+ * Ed25519 signatures are deterministic (RFC 8032): the same key over the same
+ * message always yields the same signature, so a signer can regenerate their
+ * secret whenever they need it and never has to store it anywhere.
+ */
+export const keyMessage = (vaultAddress: string) =>
+  `Stellar Vault — signer key v1\nVault: ${vaultAddress}\n\nSigning this derives your private approval key. It never leaves this device.`;
+
+/**
+ * A signer's secret and blinding for a vault, derived from a wallet signature.
+ *
+ * This is the part that must be unguessable. Deriving it from the signer's
+ * ADDRESS — as this code used to — makes the commitment public knowledge, and
+ * then anyone can compute `Poseidon(commitment, txId)` for each signer and
+ * match it against the nullifier an approval published. With three signers
+ * that is three guesses to identify the approver, and the anonymity is worth
+ * nothing. A signature can only be produced by the key holder, so the
+ * commitment becomes unguessable and the dictionary disappears.
+ */
+export async function signerKey(vaultAddress: string): Promise<{ secret: bigint; blinding: bigint }> {
+  const freighter = await import("@stellar/freighter-api");
+  const res: any = await freighter.signMessage(keyMessage(vaultAddress));
+  if (res?.error) throw new Error(String(res.error));
+
+  const sig: unknown = res?.signedMessage ?? res;
+  const bytes =
+    typeof sig === "string"
+      ? new TextEncoder().encode(sig)
+      : sig instanceof Uint8Array
+        ? sig
+        : new Uint8Array(Object.values(sig as Record<string, number>));
+
+  const buf = new Uint8Array(bytes).slice().buffer;
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  const hex = "0x" + Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const base = BigInt(hex) >> 8n; // keep it inside the field
+  return { secret: await H([base]), blinding: await H([base, 1n]) };
+}
+
+/** Deterministic field element from a string seed. */
 export async function secretFromSeed(seed: string): Promise<bigint> {
   const data = new TextEncoder().encode(seed);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -64,26 +105,20 @@ function merklePath(layers: bigint[][], index: number) {
 }
 
 /**
- * The signer commitments for a vault, derived deterministically from the signer
- * addresses and the vault's domain id.
+ * This signer's leaf in the vault's Merkle tree.
  *
- * The owner publishes the root of these on-chain and the prover proves
- * membership in the same tree, so both sides MUST derive them identically —
- * hence one function rather than two call sites that happen to agree today.
+ * Only the key holder can compute it, because only they can produce the
+ * signature it is derived from. They hand the result to the owner, who
+ * assembles everyone's and publishes them shuffled.
  */
-export async function signerCommitments(signers: string[], vaultId: bigint): Promise<bigint[]> {
-  const out: bigint[] = [];
-  for (let i = 0; i < signers.length; i++) {
-    const secret = await secretFromSeed(signers[i]);
-    out.push(await H([secret, vaultId, BigInt(i + 1)])); // blinding = i + 1
-  }
-  return out;
+export async function myCommitment(vaultAddress: string, vaultId: bigint): Promise<bigint> {
+  const { secret, blinding } = await signerKey(vaultAddress);
+  return H([secret, vaultId, blinding]);
 }
 
-/** The Merkle root the vault should pin via `set_zk_config`. */
-export async function signerRoot(signers: string[], vaultId: bigint): Promise<bigint> {
-  const tree = await buildTree(await signerCommitments(signers, vaultId));
-  return tree.root;
+/** The Merkle root of a published (shuffled) commitment list. */
+export async function rootOf(commitments: bigint[]): Promise<bigint> {
+  return (await buildTree(commitments)).root;
 }
 
 export type VoteProof = {
@@ -108,21 +143,25 @@ export async function generateVoteProof(params: {
    * produces a proof the contract will refuse.
    */
   txHash: bigint;
-  secrets: bigint[];
-  blindings: bigint[];
-  myIndex: number;
+  /** The published leaves, in the shuffled order the owner posted them. */
+  commitments: bigint[];
+  /** This signer's own key material — nobody else's is knowable. */
+  secret: bigint;
+  blinding: bigint;
 }): Promise<VoteProof> {
   const snarkjs: any = await import("snarkjs");
-  const { vaultId, txHash, secrets, blindings, myIndex } = params;
+  const { vaultId, txHash, commitments, secret, blinding } = params;
 
-  const commitments: bigint[] = [];
-  for (let i = 0; i < secrets.length; i++) {
-    commitments.push(await H([secrets[i], vaultId, blindings[i]]));
+  const myCommit = await H([secret, vaultId, blinding]);
+  const myIndex = commitments.findIndex((c) => c === myCommit);
+  if (myIndex < 0) {
+    throw new Error(
+      "Your signing key isn't in this vault's published signer set — register it, and ask the owner to publish."
+    );
   }
+
   const tree = await buildTree(commitments);
   const { pathElements, pathIndices } = merklePath(tree.layers, myIndex);
-
-  const myCommit = commitments[myIndex];
   const nullifier = await H([myCommit, txHash]);
 
   const input = {
@@ -130,8 +169,8 @@ export async function generateVoteProof(params: {
     txHash: txHash.toString(),
     signerRoot: tree.root.toString(),
     nullifier: nullifier.toString(),
-    signerSecret: secrets[myIndex].toString(),
-    blinding: blindings[myIndex].toString(),
+    signerSecret: secret.toString(),
+    blinding: blinding.toString(),
     pathElements: pathElements.map((x) => x.toString()),
     pathIndices: pathIndices.map((x) => x.toString()),
   };

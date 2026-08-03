@@ -38,12 +38,15 @@ const ALLOWED: Symbol = symbol_short!("allowed");
 const CALLOWED: Symbol = symbol_short!("callowed");
 /// Holds the whole [`ZkConfig`]; absent means this vault does not verify proofs.
 const VERIFIER: Symbol = symbol_short!("verifier");
+/// Shuffled signer commitments — the Merkle leaves a prover needs.
+const COMMITS: Symbol = symbol_short!("commits");
 
 /// Contract code version, so the dashboard can tell what a vault can do:
 ///   1 — pre-guards (no `version` entry point at all)
 ///   2 — guards, batch, cancellation, typed errors
 ///   3 — on-chain proof verification + arbitrary contract calls
-const VERSION: u32 = 3;
+///   4 — signature-derived signer keys + anonymous (unauthenticated) approval
+const VERSION: u32 = 4;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -99,6 +102,8 @@ pub enum Error {
     SelfCallForbidden = 28,
     /// The call allowlist is full.
     CallAllowlistFull = 29,
+    /// Anonymous approval needs on-chain verification switched on first.
+    VerificationNotEnabled = 30,
 }
 
 #[contracttype]
@@ -477,6 +482,46 @@ impl VaultInstance {
         Ok(())
     }
 
+    /// Approve anonymously: the proof is the authorization, so no wallet needs
+    /// to identify itself and anyone at all can submit.
+    ///
+    /// [`approve_zk`] hides the approver in the *event* while the transaction
+    /// still names them — it calls `require_auth` on the signer, so the
+    /// envelope and the argument both give it away. Anyone can read a vault's
+    /// events, take the transaction hash, and ask the network who sent it. The
+    /// proof was doing real work and the plumbing around it was undoing that.
+    ///
+    /// Once proofs are verified on-chain that identification is redundant: a
+    /// valid proof already establishes membership in the published signer set,
+    /// binds itself to this proposal, and burns a nullifier so it counts once.
+    /// A wallet signature adds nothing except the name.
+    ///
+    /// This is refused unless verification is enabled — without it the proof is
+    /// not checked, and dropping the auth as well would let anyone approve.
+    pub fn approve_zk_anon(env: Env, tx_id: u64, zk: ZKApproval) -> Result<(), Error> {
+        if Self::get_zk_config(env.clone()).is_none() {
+            return Err(Error::VerificationNotEnabled);
+        }
+        let mut p = Self::proposal(&env, tx_id)?;
+        Self::require_open(&env, tx_id, &p)?;
+
+        let nk = DataKey::Nullifier(zk.nullifier.clone());
+        if env.storage().persistent().has(&nk) {
+            return Err(Error::NullifierUsed);
+        }
+        if zk.proof.len() == 0 {
+            return Err(Error::EmptyProof);
+        }
+        Self::check_proof(&env, tx_id, &zk)?;
+
+        env.storage().persistent().set(&nk, &true);
+        p.approval_count += 1;
+        env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+
+        ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
+        Ok(())
+    }
+
     /// Execute once threshold is reached — moves funds from this vault's own
     /// balance. Both modes transfer; in private mode the difference is only that
     /// approvals were ZK proofs (the chain never learns WHO approved).
@@ -697,6 +742,27 @@ impl VaultInstance {
     /// verify proofs on-chain.
     pub fn get_zk_config(env: Env) -> Option<ZkConfig> {
         env.storage().instance().get(&VERIFIER)
+    }
+
+    /// Publish the signer commitments the Merkle tree is built from.
+    ///
+    /// A prover needs every leaf to build its membership path, so this list is
+    /// necessarily public. What must NOT be public is which leaf belongs to
+    /// whom: given that mapping, anyone could compute `Poseidon(leaf, txId)`
+    /// for each signer and match it against the nullifier an approval
+    /// published — recovering the approver in as many guesses as there are
+    /// signers.
+    ///
+    /// So the owner publishes these **shuffled**, in an order unrelated to the
+    /// signer list. Each signer recognises their own commitment; nobody else
+    /// can attribute any of them.
+    pub fn set_signer_commitments(env: Env, commitments: Vec<U256>) {
+        Self::require_owner(&env);
+        env.storage().instance().set(&COMMITS, &commitments);
+    }
+
+    pub fn get_signer_commitments(env: Env) -> Vec<U256> {
+        env.storage().instance().get(&COMMITS).unwrap_or_else(|| Vec::new(&env))
     }
 
     // ---------------- admin (owner) ----------------

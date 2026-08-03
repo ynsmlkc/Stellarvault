@@ -20,6 +20,7 @@ import {
   proposeBatch,
   approve as approveTx,
   approveZk,
+  approveZkAnon,
   execute as executeTx,
   cancel as cancelTx,
   depositToVault,
@@ -30,6 +31,8 @@ import {
   getZkConfig,
   getCall,
   getAllowedContracts,
+  getSignerCommitments,
+  setSignerCommitments,
   proposeCall,
   allowContract,
   revokeContract,
@@ -49,7 +52,7 @@ import {
   type CallArgType,
   type CallSpec,
 } from "@/lib/contract";
-import { generateVoteProof, verifyVoteProof, secretFromSeed, signerRoot } from "@/lib/prover";
+import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
 import Shield from "./shield";
 
 /* ============================ tokens ============================ */
@@ -142,13 +145,17 @@ export default function Page() {
   // null = this vault does not verify proofs on-chain
   const [zkConfig, setZkConfigState] = useState<ZkConfig | null>(null);
   const [allowedContracts, setAllowedContracts] = useState<string[]>([]);
+  // published Merkle leaves, in the shuffled order the owner posted them
+  const [commitments, setCommitments] = useState<bigint[]>([]);
+  // this signer's own leaf, shown once so they can hand it to the owner
+  const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p, pol, allow, sp, zk, callTargets] = await Promise.all([
+      const [c, b, p, pol, allow, sp, zk, callTargets, leaves] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
@@ -157,6 +164,7 @@ export default function Page() {
         getSpentInWindow(addr),
         getZkConfig(addr),
         getAllowedContracts(addr),
+        getSignerCommitments(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -166,6 +174,7 @@ export default function Page() {
       setSpent(sp);
       setZkConfigState(zk);
       setAllowedContracts(callTargets);
+      setCommitments(leaves);
 
       // guard state per proposal (time-lock, cancellation) — a pre-guards vault
       // returns null for every one of these and the UI simply falls back
@@ -323,22 +332,33 @@ export default function Page() {
     setProof(true);
     setProofStage(0);
     try {
-      const secrets = await Promise.all(config.signers.map((a) => secretFromSeed(a)));
-      const blindings = config.signers.map((_, i) => BigInt(i + 1));
-
       // When the vault verifies on-chain it dictates the domain id, and the
       // proposal id IS the second public input — the contract checks both. A
       // vault that doesn't verify keeps deriving the id from its address.
       const vId = zkConfig ? zkConfig.vault_id : await secretFromSeed(vaultAddress);
       const txHash = BigInt(txId);
 
+      // Only this signer's own key is knowable; the leaves come from the chain
+      // in the shuffled order the owner published them.
+      const { secret, blinding } = await signerKey(vaultAddress);
+      if (!commitments.length) {
+        throw new Error("This vault has no published signer set yet — the owner needs to publish one.");
+      }
+
       setProofStage(1); // generating proof
-      const vp = await generateVoteProof({ vaultId: vId, txHash, secrets, blindings, myIndex });
+      const vp = await generateVoteProof({ vaultId: vId, txHash, commitments, secret, blinding });
       const ok = await verifyVoteProof(vp.publicSignals, vp.proof);
       if (!ok) throw new Error("Local proof verification failed");
 
       setProofStage(2); // submitting on-chain
-      await approveZk(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      // With verification on, the proof authorizes itself and no wallet has to
+      // name itself. Without it the contract still demands a signer, because an
+      // unchecked proof plus no auth would let anyone approve.
+      if (zkConfig) {
+        await approveZkAnon(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      } else {
+        await approveZk(vaultAddress, txId, w, vp.proof, vp.publicSignals);
+      }
 
       setProof(false);
       setProofStage(0);
@@ -346,7 +366,9 @@ export default function Page() {
       refreshSoon();
       showToast({
         title: "Anonymous approval submitted",
-        sub: `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · voter identity hidden`,
+        sub: zkConfig
+          ? `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · no wallet identified itself`
+          : `Nullifier 0x${vp.nullifier.toString(16).slice(0, 10)}… · proof not verified on this vault`,
         tone: "ok",
       });
     } catch (e: any) {
@@ -524,32 +546,79 @@ export default function Page() {
   };
 
   /**
-   * Turn on on-chain proof verification: derive this vault's domain id and the
-   * Merkle root of its signer commitments, then publish both. From here the
-   * contract refuses any proof that isn't against this exact signer set, for
-   * this exact vault and proposal.
+   * Derive this signer's leaf and show it. Only the key holder can compute it,
+   * so every signer does this on their own device and hands the result to the
+   * owner — over any channel. It is not secret; the secret behind it never
+   * leaves the browser.
    */
-  const doEnableZk = async () => {
+  const doRegisterKey = async () => {
     const w = requireWallet();
     if (!w) return;
-    if (!config) return;
+    setBusy("register");
+    try {
+      const vId = zkConfig ? zkConfig.vault_id : await secretFromSeed(vaultAddress);
+      setMyLeaf(await myCommitment(vaultAddress, vId));
+      showToast({
+        title: "Signing key derived",
+        sub: "Send the commitment to the vault owner. Nothing was written on-chain.",
+        tone: "ok",
+      });
+    } catch (e: any) {
+      showToast({ title: "Couldn't derive your key", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * Publish the signer set: the leaves, SHUFFLED, plus the root the contract
+   * pins. The shuffle is the whole point — a list in signer order would let
+   * anyone match a nullifier back to the signer who produced it, which is
+   * exactly the leak this replaces.
+   */
+  const doPublishSignerSet = async (raw: string) => {
+    const w = requireWallet();
+    if (!w) return;
+    let leaves: bigint[];
+    try {
+      leaves = raw
+        .split(/[\s,]+/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .map((x) => BigInt(x));
+    } catch {
+      showToast({ title: "Couldn't read the commitments", sub: "Expected decimal or 0x values, one per signer.", tone: "err" });
+      return;
+    }
+    if (!leaves.length) {
+      showToast({ title: "Nothing to publish", sub: "Paste one commitment per signer.", tone: "err" });
+      return;
+    }
     if (!CONFIG.groth16VerifierId) {
       showToast({ title: "No verifier configured", sub: "NEXT_PUBLIC_GROTH16_VERIFIER_ID is unset.", tone: "err" });
       return;
     }
+
+    // Fisher-Yates: the published order must carry no information
+    for (let i = leaves.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [leaves[i], leaves[j]] = [leaves[j], leaves[i]];
+    }
+
     setBusy("zk");
     try {
       const vId = await secretFromSeed(vaultAddress);
-      const root = await signerRoot(config.signers, vId);
+      const root = await rootOf(leaves);
+      await setSignerCommitments(vaultAddress, w, leaves);
       await setZkConfigTx(vaultAddress, w, CONFIG.groth16VerifierId, vId, root);
       refreshSoon();
       showToast({
-        title: "On-chain verification enabled",
-        sub: "Approvals are now checked against a real Groth16 proof.",
+        title: `Signer set published · ${leaves.length} members`,
+        sub: "Approvals are now verified on-chain, and the order reveals nothing.",
         tone: "ok",
       });
     } catch (e: any) {
-      showToast({ title: "Couldn't enable verification", sub: cleanErr(e), tone: "err" });
+      showToast({ title: "Couldn't publish the signer set", sub: cleanErr(e), tone: "err" });
     } finally {
       setBusy(null);
     }
@@ -566,7 +635,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onEnableZk={doEnableZk} onAllowContract={doAllowContract} />
+          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -833,7 +902,7 @@ type ShellProps = {
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
-  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void; onAllowContract: (contract: string, allow: boolean) => void;
+  onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
@@ -870,7 +939,7 @@ function AppShell(p: ShellProps) {
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onEnableZk={p.onEnableZk} onAllowContract={p.onAllowContract} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
       </div>
     </div>
@@ -1643,10 +1712,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, onSave, onAllowRecipient, onEnableZk, onAllowContract }: {
+function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
   policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[];
-  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onEnableZk: () => void; onAllowContract: (contract: string, allow: boolean) => void;
+  onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
   const isOwner = !!wallet && wallet === config?.owner;
   const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
@@ -1656,6 +1725,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
   const [allowlistOnly, setAllowlistOnly] = useState(policy.allowlist_only);
   const [newRecipient, setNewRecipient] = useState("");
   const [newCallee, setNewCallee] = useState("");
+  const [pastedLeaves, setPastedLeaves] = useState("");
 
   // the vault is the source of truth — resync whenever a fresh read lands
   useEffect(() => {
@@ -1819,27 +1889,62 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
               Every ZK approval is verified by a Groth16 verifier contract, and its public inputs are pinned to this vault, this signer set and the specific proposal. A proof for another vault, or against a signer set you never published, is refused.
             </p>
             <PolicyRow label="Verifier" valueNode={<span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{shortAddr(zkConfig.verifier, 6, 5)}</span>} />
-            <PolicyRow label="Vault domain id" valueNode={<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A857B" }}>0x{zkConfig.vault_id.toString(16).slice(0, 14)}…</span>} />
             <PolicyRow label="Signer root" valueNode={<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A857B" }}>0x{zkConfig.signer_root.toString(16).slice(0, 14)}…</span>} />
+            <PolicyRow label="Published leaves" valueNode={<span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{commitments.length}</span>} />
+            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
+              Leaves are published in a shuffled order. A list in signer order would let anyone match a nullifier back to the signer who produced it.
+            </p>
           </>
         ) : (
-          <>
-            <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
-              This vault records the nullifier of a ZK approval but does not check the proof, so the anonymity is real while the guarantee is not. Publishing your signer set turns on real verification.
-            </p>
-            {isOwner ? (
-              <button onClick={onEnableZk} disabled={busy === "zk"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "zk" ? 0.6 : 1 }}>
-                {busy === "zk" ? "Publishing signer set…" : "Enable on-chain verification"}
-              </button>
-            ) : (
-              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only the owner can turn this on.</div>
-            )}
-            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
-              Changing signers afterwards means republishing the root, or their proofs stop verifying.
-            </p>
-          </>
+          <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 4, lineHeight: 1.6 }}>
+            This vault records the nullifier of a ZK approval but does not check the proof. Publish a signer set below to turn on real verification.
+          </p>
         )}
       </div>
+
+      <div style={card}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Your signing key</div>
+        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+          Your approval key is derived from a wallet signature, so only you can produce it and nobody can guess your commitment. Derive it here and send the value to the vault owner — over any channel. The secret behind it never leaves this browser, and nothing is written on-chain.
+        </p>
+        <button onClick={onRegisterKey} disabled={busy === "register"} className="h-goldbtn" style={{ width: "100%", background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, borderRadius: 10, cursor: "pointer", opacity: busy === "register" ? 0.6 : 1 }}>
+          {busy === "register" ? "Check Freighter…" : "Derive my commitment"}
+        </button>
+        {myLeaf != null && (
+          <div style={{ marginTop: 14, border: "1px solid rgba(127,176,105,0.3)", borderRadius: 10, background: "#0c0c0d", padding: 14 }}>
+            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#7FB069", marginBottom: 8 }}>YOUR COMMITMENT</div>
+            <div style={{ fontFamily: MONO, fontSize: 11.5, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.5 }}>{myLeaf.toString()}</div>
+            <button onClick={() => navigator.clipboard?.writeText(myLeaf.toString())} className="h-copy" style={{ marginTop: 10, background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, cursor: "pointer", padding: 0 }}>⧉ copy</button>
+          </div>
+        )}
+      </div>
+
+      {isOwner && (
+        <div style={card}>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Publish the signer set</div>
+          <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
+            Paste one commitment per signer, collected from each of them. They get shuffled before publishing, so the on-chain order says nothing about who is who — then the root is pinned and verification is live.
+          </p>
+          <textarea
+            value={pastedLeaves}
+            onChange={(e) => setPastedLeaves(e.target.value)}
+            placeholder={"1234…\n5678…\n9012…"}
+            rows={4}
+            style={{ ...input, width: "100%", resize: "vertical", fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}
+          />
+          <button
+            onClick={() => onPublishSignerSet(pastedLeaves)}
+            disabled={!pastedLeaves.trim() || busy === "zk"}
+            className="h-goldbtn"
+            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: pastedLeaves.trim() && busy !== "zk" ? 1 : 0.45 }}
+          >
+            {busy === "zk" ? "Publishing…" : zkConfig ? "Republish signer set" : "Publish & enable verification"}
+          </button>
+          <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
+            Adding or removing a signer means republishing, or their proofs stop verifying.
+          </p>
+        </div>
+      )}
 
       {isOwner && (
         <>
