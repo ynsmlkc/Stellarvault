@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml/badge.svg)](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml)
 [![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
-[![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2023-C9A86A)](stellar-vault/)
+[![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2027-C9A86A)](vault-instance/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
 
 ---
@@ -97,7 +97,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 
 | Layer          | Tech                                                 |
 | -------------- | ---------------------------------------------------- |
-| Smart contract | Rust + Soroban SDK 23                                |
+| Smart contract | Rust + Soroban SDK 27 (BN254 host functions)          |
 | ZK circuit     | circom 2.2 + circomlib (Poseidon, Merkle membership) |
 | Proving        | snarkjs (Groth16, BN254) — runs in the browser       |
 | Frontend       | Next.js 14 (App Router) + React 18 + TypeScript      |
@@ -204,8 +204,10 @@ Three separate things had to be true, and each was a distinct fix:
 
 1. **Create a vault** — connect Freighter, pick signers + threshold, sign on-chain.
 2. **Transparent transaction** — propose 10 XLM → approve → execute. Recipient balance visibly increases. _"Alice, Bob approved. 10 XLM → GXYZ…"_
-3. **Private transaction** — toggle to Private, propose → **Approve (ZK)**: a real Groth16 proof is generated in-browser (witness → proof → submit), the nullifier lands on-chain. _"🔒 approved — voter identity hidden."_
-4. **Compare** — same vault, same threshold, two privacy levels, side by side.
+3. **Turn on verification** — in Guards, each signer derives their commitment from a wallet signature; the owner publishes the set (shuffled) and the root is pinned. The panel flips to **ENFORCED**.
+4. **Private transaction** — toggle to Private, propose → **Approve (ZK)**: a real Groth16 proof is generated in-browser, verified **on-chain** by the verifier contract, and submitted through `approve_zk_anon` — no wallet identifies itself. _"🔒 approved — the ledger records only a nullifier."_
+5. **Guards** — set a per-tx limit and a time-lock, then watch a proposal be refused before it is even signed, and an approved one sit locked until its ledger.
+6. **Contract call** — allowlist a contract, propose a call, execute: the vault acts as itself on another contract.
 
 ---
 

@@ -1,3 +1,8 @@
+> **Note — this file is the June 2026 hackathon submission, kept as a record.**
+> The project has moved on considerably since: Safe-style guards, arbitrary
+> contract calls, on-chain Groth16 verification, signature-derived signer keys
+> and anonymous approval. See the root `README.md` for current status.
+
 # Submission Kit — Stellar Vault
 
 Ready-to-paste copy for DoraHacks + a shot-by-shot demo video script.

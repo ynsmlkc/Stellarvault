@@ -63,7 +63,7 @@ Soroban akıllı sözleşmeleri üzerine inşa edilmiş multi-sig cüzdan platfo
 
 | Katman | Teknoloji | Not |
 |---|---|---|
-| Smart Contract | Rust + Soroban SDK 23.x | Stellar'ın resmi SDK |
+| Smart Contract | Rust + Soroban SDK 27.x | Stellar'ın resmi SDK (BN254 host fn) |
 | Voter Privacy | Circom 2.2.2 (voteApproval) | selectiveDisclosure'dan adapte |
 | Confidential TX | Nethermind Pool contract | UTXO + ZK + encrypted outputs |
 | ZK Verifier | Soroban BN254 precompile | CAP-0059, native |

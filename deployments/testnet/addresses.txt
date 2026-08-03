@@ -118,3 +118,44 @@ Verified on testnet, isolated vault CCSB7RF5ZC646D4YQI26DPPUQ7A54IVLJJ4EDOBH5Z34
 
 First vault from the upgraded factory: CAXGKR2ZCQFEZ67IDIAFPHR6KD4BFVSS3HAZOFALODUVHRSBBKOHULZN
   version() = 3, empty call allowlist, no zk config — i.e. safe defaults.
+
+---
+
+## Real signer secrets + anonymous approval (2026-08-03)
+
+vault-instance, VERSION 4 = 4cf255ce91af7c924648bc70a1e7580ade9bee95324710d83584459472c2df3a
+  factory.set_wasm applied — this is what new vaults get now.
+  Adds set_signer_commitments / get_signer_commitments and approve_zk_anon.
+
+Two defects in the anonymous-approval feature, both fixed here:
+
+  1. The signer secret was derived from the signer's public ADDRESS, so every
+     input to the commitment was public and an observer could compute
+     Poseidon(commitment, txId) per signer and match the published nullifier.
+     Reproducing a real testnet approval's nullifier from public data alone
+     confirmed it. Keys now come from a wallet signature (Ed25519, so
+     deterministic — regenerated on demand, never stored).
+
+  2. approve_zk called require_auth on the signer and took their address as an
+     argument, so the transaction named the approver twice. approve_zk_anon
+     takes no address and calls no require_auth: the proof is the
+     authorization. Refused unless verification is enabled.
+
+Leaves are published SHUFFLED. A prover needs every leaf for its Merkle path,
+so the list must be public — but in signer order it would hand back the exact
+mapping fix (1) removes.
+
+Verified on testnet, vault CBTULRSDGSBY4LRDCY67FB46LG4YYLSFXNIOZY7UDC6J2QBLOUF2SCXQ:
+  - commitment from signature != the value derived from the public address
+  - a wallet that is NOT a signer submitted a valid approval; it counted, and
+    the ledger records only that submitter
+
+Reproduce: cd circuits && DEPLOYER_SECRET=… STRANGER_SECRET=… \
+             node e2e-anon.mjs <vault> <verifier>
+
+First vault from the upgraded factory: CD6KZV2ZVXTD7PERRTCPPMNHKPH6ZPFMZ72PSPGDQO3COJSBWORJQ4K2
+  version() = 4, no zk config, no published signer set — safe defaults.
+
+NOTE: the new key derivation is incompatible with the old one. A vault that had
+verification enabled before this must republish its signer set, or its members'
+proofs will no longer verify.
