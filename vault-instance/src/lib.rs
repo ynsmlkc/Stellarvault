@@ -45,7 +45,8 @@ const COMMITS: Symbol = symbol_short!("commits");
 ///   1 — pre-guards (no `version` entry point at all)
 ///   2 — guards, batch, cancellation, typed errors
 ///   3 — on-chain proof verification + arbitrary contract calls
-const VERSION: u32 = 3;
+///   4 — signature-derived signer keys + anonymous (unauthenticated) approval
+const VERSION: u32 = 4;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;

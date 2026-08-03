@@ -87,7 +87,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 3);
+    assert_eq!(s.vault.version(), 4);
 }
 
 #[test]
