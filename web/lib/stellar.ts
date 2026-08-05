@@ -11,6 +11,12 @@ export const CONFIG = {
   verifierId: process.env.NEXT_PUBLIC_VERIFIER_CONTRACT_ID ?? "",
   /** Our Groth16 verifier, keyed to voteApproval.circom. */
   groth16VerifierId: process.env.NEXT_PUBLIC_GROTH16_VERIFIER_ID ?? "",
+  /** Confidential token stack (OpenZeppelin), wrapping the native XLM SAC. */
+  confidentialTokenId: process.env.NEXT_PUBLIC_CONFIDENTIAL_TOKEN_ID ?? "",
+  confidentialVerifierId: process.env.NEXT_PUBLIC_CONFIDENTIAL_VERIFIER_ID ?? "",
+  confidentialAuditorId: process.env.NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_ID ?? "",
+  /** Ledger the confidential token was deployed at — where event replay starts. */
+  confidentialFromLedger: Number(process.env.NEXT_PUBLIC_CONFIDENTIAL_FROM_LEDGER ?? "0"),
   network: process.env.NEXT_PUBLIC_NETWORK ?? "testnet",
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",
 };

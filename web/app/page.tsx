@@ -54,6 +54,7 @@ import {
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
 import Shield from "./shield";
+import Confidential from "./confidential";
 
 /* ============================ tokens ============================ */
 const DISPLAY = "'Newsreader',serif";
@@ -75,7 +76,7 @@ const markApproved = (v: string, t: number, w: string) => {
   } catch {}
 };
 
-type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield" | "guards";
+type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield" | "guards" | "confidential";
 type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
@@ -624,7 +625,7 @@ export default function Page() {
     }
   };
 
-  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards";
+  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards" || screen === "confidential";
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
@@ -635,7 +636,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -902,6 +903,7 @@ type ShellProps = {
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
+  onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
@@ -920,6 +922,7 @@ function AppShell(p: ShellProps) {
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
             {navBtn("🔒 Confidential", p.screen === "shield", () => p.go("shield"))}
             {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
+            {navBtn("💠 Confidential", p.screen === "confidential", () => p.go("confidential"))}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -941,6 +944,16 @@ function AppShell(p: ShellProps) {
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
+        {p.screen === "confidential" && (
+          <Confidential
+            wallet={p.wallet}
+            vaultAddress={p.vaultAddress}
+            fromLedger={CONFIG.confidentialFromLedger}
+            onBack={() => p.go("vault")}
+            onProposed={p.onConfidentialProposed}
+            onError={p.onConfidentialError}
+          />
+        )}
       </div>
     </div>
   );

@@ -585,6 +585,28 @@ export const proposeCall = (
     proposer
   );
 
+/**
+ * Propose a call whose arguments are already ScVals.
+ *
+ * `proposeCall` takes typed CallArgs because a human is filling in a form.
+ * Callers that build their own payloads — a ZK proof envelope, say — have
+ * nothing to type and would only lose fidelity round-tripping through strings.
+ */
+export const proposeCallRaw = (
+  vaultAddr: string,
+  proposer: string,
+  contract: string,
+  fn: string,
+  args: xdr.ScVal[],
+  privateMode = false
+) =>
+  invoke(
+    vaultAddr,
+    "propose_call",
+    [addr(proposer), addr(contract), xdr.ScVal.scvSymbol(fn), xdr.ScVal.scvVec(args), bool(privateMode)],
+    proposer
+  );
+
 export const allowContract = (vaultAddr: string, owner: string, contract: string) =>
   invoke(vaultAddr, "allow_contract", [addr(contract)], owner);
 

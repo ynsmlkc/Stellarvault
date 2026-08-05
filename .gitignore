@@ -33,3 +33,6 @@ circuits/build/
 # and are tracked — they are cited from READMEs and commit messages.
 spike/deployer-api/
 spike/*/target/
+
+# bb.js browser build, vendored at build time by web/scripts/vendor-bb.mjs
+web/public/vendor/bb/
