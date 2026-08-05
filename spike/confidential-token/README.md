@@ -72,14 +72,48 @@ Adopting it trades a small, self-contained, audited-by-nobody circuit of ours fo
 a larger, better-designed, audited-by-nobody stack of theirs, plus a dependency
 on a moving branch.
 
-## Deployed contracts used (testnet)
+## Our own deployment (testnet)
+
+The first run borrowed the upstream demo's contracts, which meant **their**
+auditor key could decrypt our amounts. So we deployed our own stack, and the
+vault flow was re-verified against it end to end.
 
 | | |
-| --------- | ---------------------------------------------------------- |
-| token     | `CBF64DEOVQAXJFBSNGFEUT2AH4H7K5JBY3ZYJ5GVEINMNSDISWRG5N3F` |
-| verifier  | `CDCET36PIS44DWJM5UQSSI4ZHGRDSBIIQW4G4ALPYK3Y6FEQGY5ZWFXL` |
-| auditor   | `CA4II62E35TQKPGHCPBD6EBAS732GSGS6H37UUWKEDHR4YTBVMPHVY4L` |
-| underlying | native XLM SAC                                            |
+| ---------- | ---------------------------------------------------------- |
+| token      | `CDTZAT6D3XYS43A5Z6KVXZIFCBIVLBNO4R75OF2WWLCMCWZDQNBI3W2K` |
+| verifier   | `CCB4WJQHSKSY2KF6BYZ6IUISTERRBGLHM5WU4E6CLWW2E4QOSMDVKRNZ` |
+| auditor    | `CDJAFGSWQSYV32IMG5B7LYOULDJDCZM3AOSNSFV76YKDSEYZ34L5VGOW` |
+| underlying | native XLM SAC — real XLM, not a new asset                 |
+| allowlist  | `CC5VE5LHHA6TXXWLT4MYTO7NRC2WJGF4UDNGDCBR3FS3RVNJ6ZZETFMH` |
+| blocklist  | `CCTN7HN4FRGL763VG7OPC5XIXAKWRLH5O7JPLRM2Y45AQGI23M6A7QMD` |
+| factory    | `CBXH5SYQ73KMM5F5FNWQGFK3TYXJL6LFYLYSOCWSHTH2P34WZ3QS4DQV` |
+
+Deployed by the `admin` CLI identity, which also holds the auditor secret. It is
+**not** in `deployment.testnet.json` here — regenerate the stack with
+`pnpm deploy:contracts` to get your own.
+
+Worth being clear about what this is: a confidential token is a **wrapper**, not
+a new asset. `underlying_asset` is the native XLM SAC, so deposits are real XLM
+going in and withdrawals are real XLM coming out. Only the container changes.
+
+All six circuit verification keys (register, withdraw, transfer,
+spender_transfer, set_spender, revoke_spender) are registered in our verifier,
+and `addr_f` parity against the circuits was checked at deploy time.
+
+Re-verified against this stack, vault `CAETYEOTYEAGZZLIE6GLTLUKK3LZPJCCC6E2BKZ4JWUTEMMUVCTOHQRD`:
+register -> deposit 1000 -> merge -> confidential_transfer 400 -> spendable 600.
+
+### The auditor, now that we control it
+
+The design always has one: every transfer emits a ciphertext to the registered
+auditor key, so amounts are confidential *and* auditable. That is the point for
+regulated users, and a cost for anyone wanting privacy with no back door.
+
+Holding the key ourselves answers the "who is the auditor" question, but does not
+remove the channel. Whether it can be neutered — by registering a point whose
+discrete log nobody knows — is untested, and the circuits may well reject it.
+Our own `shield-pool` has no such channel at all, which remains a real
+difference between the two options rather than a detail.
 
 ## Reproducing
 
