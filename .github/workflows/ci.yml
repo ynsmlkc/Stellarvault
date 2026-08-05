@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [vault-instance, vault-factory, shield-pool, stellar-vault]
+        crate: [vault-instance, vault-factory, groth16-verifier]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

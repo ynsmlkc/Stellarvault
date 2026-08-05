@@ -53,7 +53,6 @@ import {
   type CallSpec,
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
-import Shield from "./shield";
 import Confidential from "./confidential";
 
 /* ============================ tokens ============================ */
@@ -76,7 +75,7 @@ const markApproved = (v: string, t: number, w: string) => {
   } catch {}
 };
 
-type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield" | "guards" | "confidential";
+type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "guards" | "confidential";
 type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
@@ -625,7 +624,7 @@ export default function Page() {
     }
   };
 
-  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards" || screen === "confidential";
+  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "guards" || screen === "confidential";
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
@@ -771,8 +770,8 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           {[
             ["Safe-style factory", "One contract per vault"],
             ["Per-transaction privacy", "Transparent or private, your call"],
-            ["ZK voter privacy", "Hide who approved (Groth16)"],
-            ["Shielded pool", "Hide amount + recipient"],
+            ["ZK voter privacy", "Hide who approved (Groth16, verified on-chain)"],
+            ["Confidential balances", "Hide amounts, on a SEP-41 standard"],
           ].map(([t, d]) => (
             <div key={t} style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: "16px 18px" }}>
               <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 4 }}>{t}</div>
@@ -920,9 +919,8 @@ function AppShell(p: ShellProps) {
           </div>
           <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
-            {navBtn("🔒 Confidential", p.screen === "shield", () => p.go("shield"))}
             {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
-            {navBtn("💠 Confidential", p.screen === "confidential", () => p.go("confidential"))}
+            {navBtn("🔒 Confidential", p.screen === "confidential", () => p.go("confidential"))}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -943,7 +941,6 @@ function AppShell(p: ShellProps) {
         {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
-        {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
         {p.screen === "confidential" && (
           <Confidential
             wallet={p.wallet}

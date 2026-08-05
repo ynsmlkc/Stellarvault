@@ -253,7 +253,7 @@
             <span class="pill prv">Identity hidden</span>
           </div>
         </div>
-        <p class="kicker" data-r style="--i:5">Voter privacy hides <b>who approved</b>. A separate <b style="color:var(--violet)">shielded pool</b> hides <b>amount + recipient</b> and severs the deposit↔recipient link entirely.</p>
+        <p class="kicker" data-r style="--i:5">Voter privacy hides <b>who approved</b>. A <b style="color:var(--violet)">confidential balance</b> hides <b>how much</b> — real XLM wrapped in Pedersen commitments, amounts never on the ledger.</p>
       </div>
     </section>
 
@@ -281,7 +281,7 @@
         <p class="lead" data-r style="--i:2">Stellar Vault is a <strong>Soroban smart contract</strong> — which is exactly what makes the rest possible:</p>
         <ul class="clean">
           <li data-r style="--i:3"><b>Zero-knowledge approvals</b> — verifying + recording a Groth16 nullifier on approval is logic a native account simply cannot execute.</li>
-          <li data-r style="--i:4"><b>Confidential execution</b> — moving funds through a shielded pool needs a programmable contract.</li>
+          <li data-r style="--i:4"><b>Confidential balances</b> — being the account behind a commitment-based balance needs a contract, not just an address.</li>
           <li data-r style="--i:5"><b>A factory, one contract per vault</b> — each vault is its own deployed contract with its own address and balance, Gnosis-Safe-style.</li>
         </ul>
         <blockquote class="big-quote" data-r style="--i:6">LOBSTR Vault is “Stellar’s signing app.”<br>Stellar Vault is “Stellar’s <span class="hi-gold">confidential, programmable</span> Safe.”</blockquote>
@@ -292,7 +292,7 @@
     <section class="slide" aria-label="Architecture">
       <div class="inner">
         <p class="eyebrow" data-r style="--i:0">05 — Architecture</p>
-        <h2 data-r style="--i:1">A factory, a vault per team, a shielded pool.</h2>
+        <h2 data-r style="--i:1">A factory, a vault per team, confidential balances.</h2>
         <div class="grid3" style="margin-top:26px">
           <div class="card" data-r style="--i:2"><span class="k">Vault Factory</span><p>Deploys a fresh contract per vault — own address, own native balance, on-chain <span class="mono hi-gold">owner→vaults</span> registry. True Safe architecture.</p></div>
           <div class="card" data-r style="--i:3"><span class="k">Vault Instance</span><p>Signer management, threshold, <span class="mono">propose</span> / <span class="mono">approve</span> / <span class="mono">approve_zk</span> / <span class="mono">execute</span> / <span class="mono">cancel</span>.</p></div>
@@ -369,7 +369,7 @@
         <ul class="clean">
           <li data-r style="--i:2"><b>The big one:</b> testing revealed every vault shared one balance → I re-architected into a <b>Safe-style factory</b>, one isolated contract per vault. A major rewrite driven directly by using the product.</li>
           <li data-r style="--i:3">A co-signer on a second account couldn’t see the shared vault → the factory now registers each vault under <b>every signer</b>, not just the owner.</li>
-          <li data-r style="--i:4">“Private hides everything” was misleading → reframed honestly: private = <b>anonymous approvals</b>, with a separate shielded pool for amount/recipient.</li>
+          <li data-r style="--i:4">“Private hides everything” was misleading → reframed honestly: private = <b>anonymous approvals</b>, with a separate layer for amounts — now OpenZeppelin’s confidential token.</li>
           <li data-r style="--i:5">Execute failed on RPC lag → added <b>retries + longer polling</b>. Approve button re-click errored → added a clear <b>“you approved · waiting”</b> state. Mobile → responsive layout.</li>
         </ul>
       </div>

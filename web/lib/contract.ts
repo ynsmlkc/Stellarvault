@@ -624,39 +624,3 @@ export const proposeBatch = (
 /** Deposit = a plain token transfer to the vault's own address (Safe-style). */
 export const depositToVault = (vaultAddr: string, from: string, amountStroops: bigint) =>
   invoke(CONFIG.tokenId, "transfer", [addr(from), addr(vaultAddr), i128(amountStroops)], from);
-
-/* ---------------- shield pool (confidential transfer) ---------------- */
-
-/** Deposit `amount` into the shield pool, registering a note `commitment`. */
-export const poolDeposit = (from: string, amountStroops: bigint, commitment: bigint) =>
-  invoke(CONFIG.shieldPoolId, "deposit", [addr(from), i128(amountStroops), u256(commitment)], from);
-
-/** Confidential withdraw: spend a note (Groth16 proof) to `recipient`. */
-export const poolWithdraw = (
-  signer: string,
-  proof: any,
-  root: bigint,
-  nullifierHash: bigint,
-  recipient: string,
-  amountStroops: bigint
-) =>
-  invoke(
-    CONFIG.shieldPoolId,
-    "withdraw",
-    [nativeToScVal(proofTo256(proof)), u256(root), u256(nullifierHash), addr(recipient), i128(amountStroops)],
-    signer
-  );
-
-/** All deposited commitments — the frontend rebuilds the Merkle tree from these. */
-export async function getCommitments(): Promise<bigint[]> {
-  const list = await simulate(CONFIG.shieldPoolId, "get_commitments", []);
-  return (list ?? []).map((x: any) => BigInt(x));
-}
-
-export async function isSpent(nullifierHash: bigint): Promise<boolean> {
-  return simulate(CONFIG.shieldPoolId, "is_spent", [u256(nullifierHash)]);
-}
-
-export async function getShieldBalance(): Promise<bigint> {
-  return BigInt(await simulate(CONFIG.tokenId, "balance", [addr(CONFIG.shieldPoolId)]));
-}

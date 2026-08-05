@@ -5,8 +5,6 @@ export const CONFIG = {
   demoVault: process.env.NEXT_PUBLIC_DEMO_VAULT ?? "",
   vaultId: process.env.NEXT_PUBLIC_VAULT_CONTRACT_ID ?? "",
   tokenId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
-  poolId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",
-  shieldPoolId: process.env.NEXT_PUBLIC_SHIELD_POOL_ID ?? "",
   /** Nethermind's verifier — explored in Faz 4, keyed to their circuit, unused. */
   verifierId: process.env.NEXT_PUBLIC_VERIFIER_CONTRACT_ID ?? "",
   /** Our Groth16 verifier, keyed to voteApproval.circom. */
