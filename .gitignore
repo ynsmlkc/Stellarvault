@@ -28,5 +28,8 @@ circuits/build/
 # Local config
 .claude/
 
-# throwaway deployer-API spike
-spike/
+# The original throwaway deployer-API spike. Later spikes under spike/ are
+# evidence for decisions (BN254 availability, confidential-token integration)
+# and are tracked — they are cited from READMEs and commit messages.
+spike/deployer-api/
+spike/*/target/
