@@ -115,6 +115,32 @@ discrete log nobody knows — is untested, and the circuits may well reject it.
 Our own `shield-pool` has no such channel at all, which remains a real
 difference between the two options rather than a detail.
 
+## The sub-call authorisation, verified both ways
+
+`deposit(from = vault)` makes the token call the underlying SAC's
+`transfer(from = vault, …)` — one level below the vault's own call. A contract's
+authority covers only what it invokes directly, so the host refuses that
+transfer however the proposal was approved:
+
+    Error(Auth, InvalidAction)
+    "encountered unauthorized call for a contract earlier in the call stack,
+     make sure that you have called `authorize_as_current_contract()`"
+
+Naming the sub-call in the proposal fixes it. Both directions are observed on
+testnet, vault `CBKAED23M23M6CFZ6UJ74WMT4DWRSXBLECCO7DQIFPNZD23GV2KJFVXU`:
+
+| | |
+| --------------------------- | ------------------------------------------- |
+| deposit without the auth list | `Error(Auth, InvalidAction)`               |
+| deposit with it              | proposal executed, 1000 moved in            |
+| then merge, then transfer 400 | spendable 1000 -> 600                      |
+
+`authorize_as_current_contract` appears nowhere in the upstream demo, and there
+is no contract-owned-account example — reasonable, since the demo is built
+around user wallets. It is worth asking upstream whether this is the intended
+pattern for a contract holding a confidential balance, or whether
+`set_spender` / `confidential_transfer_from` is meant to cover it.
+
 ## Reproducing
 
 The spike needs the upstream demo repo for its SDK and circuit artifacts:

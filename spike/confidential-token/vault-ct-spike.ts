@@ -66,12 +66,22 @@ async function vaultCall(method: string, args: xdr.ScVal[]): Promise<any> {
 const u64 = (n: bigint | number) => xdr.ScVal.scvU64(new xdr.Uint64(BigInt(n)));
 
 /** The whole integration: a confidential-token op travels as a vault proposal. */
-async function proposeApproveExecute(fn: string, args: xdr.ScVal[]): Promise<void> {
+const entry = (k: string, v: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
+
+const callSpec = (contract: string, fn: string, args: xdr.ScVal[]) =>
+  xdr.ScVal.scvMap([
+    entry("args", xdr.ScVal.scvVec(args)),
+    entry("contract", new Address(contract).toScVal()),
+    entry("function", xdr.ScVal.scvSymbol(fn)),
+  ]);
+
+async function proposeApproveExecute(fn: string, args: xdr.ScVal[], auth: xdr.ScVal[] = []): Promise<void> {
   const txId = await vaultCall("propose_call", [
     new Address(owner.publicKey()).toScVal(),
     new Address(CT).toScVal(),
     xdr.ScVal.scvSymbol(fn),
     xdr.ScVal.scvVec(args),
+    xdr.ScVal.scvVec(auth),
     xdr.ScVal.scvBool(false),
   ]);
   const id = BigInt(txId);
@@ -99,7 +109,9 @@ async function main() {
   await vaultCall("allow_contract", [new Address(CT).toScVal()]);
 
   console.log("\n[register] the VAULT becomes a confidential account …");
-  {
+  if (await client.isRegistered(VAULT)) {
+    console.log("  already registered — skipping");
+  } else {
     const w = buildRegisterWitness(vaultKeys);
     const { proof } = await new CircuitProver(loadCircuit("register")).prove(w.inputs);
     await proposeApproveExecute("register", [
@@ -109,14 +121,24 @@ async function main() {
     ]);
   }
 
-  console.log("\n[deposit] funding the vault's confidential balance …");
-  // deposit needs no vault authorisation — anyone may fund it
-  await client.invoke(CT, "deposit", [
-    new Address(owner.publicKey()).toScVal(),
-    new Address(VAULT).toScVal(),
-    xdr.ScVal.scvI128(new xdr.Int128Parts({ hi: new xdr.Int64(0n), lo: new xdr.Uint64(DEPOSIT) })),
-  ], ownerSigner);
-  console.log(`  deposited ${DEPOSIT}`);
+  console.log("\n[deposit] the VAULT funds its own confidential balance …");
+  // The claim under test: deposit(from = vault) makes the token call the
+  // underlying SAC's transfer(from = vault, …) one level below the vault's own
+  // call, so the vault must pre-authorise it or the host refuses with
+  // Error(Auth, InvalidAction) however the proposal was approved.
+  const i128 = (v: bigint) =>
+    xdr.ScVal.scvI128(new xdr.Int128Parts({ hi: new xdr.Int64(0n), lo: new xdr.Uint64(v) }));
+  await vaultCall("allow_contract", [new Address(dep.contracts.underlying).toScVal()]);
+  await proposeApproveExecute(
+    "deposit",
+    [new Address(VAULT).toScVal(), new Address(VAULT).toScVal(), i128(DEPOSIT)],
+    [callSpec(dep.contracts.underlying, "transfer", [
+      new Address(VAULT).toScVal(),
+      new Address(CT).toScVal(),
+      i128(DEPOSIT),
+    ])]
+  );
+  console.log(`  deposited ${DEPOSIT} through the vault`);
 
   console.log("\n[merge] folding receiving → spendable, as a proposal …");
   await proposeApproveExecute("merge", [new Address(VAULT).toScVal()]);
