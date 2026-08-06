@@ -1686,9 +1686,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                kind === "call"
-                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
-                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                {kind === "call" ? (
+                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                ) : (
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.08)" }} />
                 <Row label="Approvals" value="visible to all" />
               </div>
@@ -1700,9 +1702,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                kind === "call"
-                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
-                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                {kind === "call" ? (
+                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                ) : (
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
