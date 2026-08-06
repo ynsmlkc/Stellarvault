@@ -808,7 +808,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 16, background: "linear-gradient(180deg,#101010,#0c0c0d)", padding: 30, overflow: "hidden" }}>
             <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.018) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#8A857B" }}>🔒 PRIVATE · ZK</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#8A857B" }}>🕶 ANONYMOUS APPROVALS</span>
               <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>RECEIPT #4472</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -920,7 +920,7 @@ function AppShell(p: ShellProps) {
           <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
             {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
-            {navBtn("🔒 Confidential", p.screen === "confidential", () => p.go("confidential"))}
+            {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1424,7 +1424,7 @@ function PrivateTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
       <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🕶 ANONYMOUS APPROVALS{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
@@ -1525,11 +1525,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
         <div style={{ position: "absolute", top: 5, bottom: 5, left: 5, width: "calc(50% - 5px)", borderRadius: 9, background: isPrivate ? "rgba(236,231,221,0.04)" : "rgba(201,168,106,0.12)", border: `1px solid ${isPrivate ? "rgba(236,231,221,0.16)" : "rgba(201,168,106,0.45)"}`, transition: "transform .32s cubic-bezier(.4,0,.2,1),background .32s,border-color .32s", transform: isPrivate ? "translateX(100%)" : "translateX(0)" }} />
         <button onClick={() => setMode("transparent")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#8A857B" : "#C9A86A" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>◎ Transparent</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Public &amp; auditable</span>
+          <span style={{ fontSize: 11, color: "#8A857B" }}>Everything visible</span>
         </button>
         <button onClick={() => setMode("private")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#ECE7DD" : "#8A857B" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>🔒 Private · ZK</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Confidential transfer</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>🕶 Anonymous approvals</span>
+          <span style={{ fontSize: 11, color: "#8A857B" }}>Hides who approved</span>
         </button>
       </div>
 
@@ -1650,7 +1650,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
               <div>
                 <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>Approver identities will be hidden</div>
-                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount &amp; recipient (they approve it), but each approval is a zero-knowledge proof — the chain records only a nullifier, never <span style={{ color: "#ECE7DD" }}>who</span> signed. To also hide the amount &amp; recipient from everyone, use the 🔒 Confidential pool.</div>
+                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount and recipient — they are approving it — but each approval is a zero-knowledge proof, so the chain records only a nullifier and never <span style={{ color: "#ECE7DD" }}>who</span> signed. This hides the approvers, not the amount. To hide <span style={{ color: "#ECE7DD" }}>how much</span>, pay from the vault&apos;s hidden balance instead.</div>
               </div>
             </div>
           )}
@@ -1698,7 +1698,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
           ) : (
             <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(236,231,221,0.1)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
-              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🔒 PRIVATE · ZK</span>
+              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🕶 ANONYMOUS APPROVALS</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />

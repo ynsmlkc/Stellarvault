@@ -97,9 +97,9 @@ export default function Confidential({ wallet, vaultAddress, fromLedger, onBack,
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       <button onClick={onBack} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
-      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Confidential balance</h1>
+      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Hidden amounts</h1>
       <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 22, lineHeight: 1.6 }}>
-        A second balance for this vault, held as a commitment — amounts never appear on-chain. It wraps real XLM: what goes in comes back out. Each action below is an ordinary proposal, so the threshold and time-lock apply.
+        {"A second balance for this vault, held as a commitment, so amounts never appear on-chain. It wraps real XLM: what goes in comes back out. This hides "}<span style={{ color: "#ECE7DD" }}>how much</span> — to hide <span style={{ color: "#ECE7DD" }}>who approved</span>, use anonymous approvals when proposing. Each action below is an ordinary proposal, so the threshold and time-lock apply.
       </p>
 
       <div style={card}>
