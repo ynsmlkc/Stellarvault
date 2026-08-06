@@ -24,9 +24,17 @@
  *
  * # The auditor
  *
- * Every transfer also emits a ciphertext to a registered auditor key, by design:
- * this is confidential *and* auditable, which is the point for regulated users.
- * The channel cannot be switched off here. Our own deployment holds that key.
+ * Every transfer emits a ciphertext to a registered auditor key — the design has
+ * no switch for it. What it does not require is that anyone hold the matching
+ * secret: a key derived by hashing a fixed string onto the curve, rather than as
+ * k·G, is a valid point nobody knows a discrete log for. Bound to that, the
+ * channel is present and openable by no one.
+ *
+ * `CONFIG.confidentialAuditorIndex` chooses which: 0 is a real keypair (held by
+ * whoever deployed the stack, so amounts are decryptable by them), 1 is the
+ * keyless one. Verified working in `spike/confidential-token/`; whether upstream
+ * considers it sound is an open question, and the derivation string is published
+ * so the claim is checkable rather than trusted.
  *
  * # Maturity
  *
@@ -126,7 +134,7 @@ export async function buildRegisterArgs(vaultAddress: string, keys: any): Promis
   const { proof } = await new m.CircuitProver(await circuit("register")).prove(w.inputs);
   return [
     new Address(vaultAddress).toScVal(),
-    xdr.ScVal.scvU32(0), // auditor id
+    xdr.ScVal.scvU32(CONFIG.confidentialAuditorIndex),
     m.encodeRegisterData(w, proof),
   ];
 }
@@ -209,7 +217,10 @@ export async function buildTransferArgs(
 
   // Sender and recipient may sit under different auditors — each channel is
   // encrypted to its own.
-  const [kAudR, kAudS] = await Promise.all([c.auditorKey(to.auditorId), c.auditorKey(0)]);
+  const [kAudR, kAudS] = await Promise.all([
+    c.auditorKey(to.auditorId),
+    c.auditorKey(CONFIG.confidentialAuditorIndex),
+  ]);
 
   const w = m.buildTransferWitness({
     keys, v: s.spendable.v, r: s.spendable.r, amount,

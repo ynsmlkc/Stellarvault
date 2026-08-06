@@ -286,7 +286,12 @@ export default function Confidential({
       <div style={{ ...card, marginBottom: 0 }}>
         <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#8A857B", marginBottom: 10 }}>WHAT IS AND ISN&apos;T HIDDEN</div>
         <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.7 }}>
-          Amounts are hidden from everyone on-chain. Sender and recipient addresses stay public — this hides <span style={{ color: "#ECE7DD" }}>how much</span>, not <span style={{ color: "#ECE7DD" }}>who</span>. Every transfer also emits a ciphertext to a registered auditor, by design: confidential and auditable.
+          Amounts are hidden from everyone on-chain. Sender and recipient addresses stay public — this hides <span style={{ color: "#ECE7DD" }}>how much</span>, not <span style={{ color: "#ECE7DD" }}>who</span>.
+          {CONFIG.confidentialAuditorIndex === 0 ? (
+            <> Every transfer also emits a ciphertext to a registered auditor, who can open it — confidential and auditable.</>
+          ) : (
+            <> Every transfer emits an auditor ciphertext by design, but this deployment binds it to a key nobody holds — derived by hashing a fixed string onto the curve rather than as k·G — so no one can open it.</>
+          )}
         </div>
         <div style={{ marginTop: 12, fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>
           token{" "}

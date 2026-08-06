@@ -63,7 +63,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **ZK voter privacy**                            | ✅ **Real ZK**           | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), proofs generated **in-browser** and verified **on-chain**; signer keys come from a wallet signature, leaves are published shuffled, and `approve_zk_anon` needs no wallet to identify itself — see the limits below |
 | **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
-| **Confidential balances**                       | ✅ **Live on testnet**   | a vault holds a second balance on OpenZeppelin's confidential token (Pedersen commitments, UltraHonk proofs) wrapping real XLM — **amounts never appear on-chain**. Every operation is an ordinary proposal, so the threshold and time-lock govern it. Sender and recipient stay public |
+| **Confidential balances**                       | ✅ **Live on testnet**   | a vault holds a second balance on OpenZeppelin's confidential token (Pedersen commitments, UltraHonk proofs) wrapping real XLM — **amounts never appear on-chain**. Every operation is an ordinary proposal, so the threshold and time-lock govern it. Sender and recipient stay public; the auditor channel is bound to a key nobody holds (see below) |
 | **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
 | **Arbitrary contract calls**                    | ✅ **Live on testnet**   | a proposal can call any allowlisted contract — swap on a DEX, supply to a lending market, move an asset the vault wasn't created with. Multi-asset falls out of it; the vault can never call itself |
 | **On-chain Groth16 verify**                     | ✅ **Live on testnet**   | a verifier contract keyed to **our** circuit's vk checks every ZK approval, and the vault pins all four public inputs to itself, its published signer set and the specific proposal — so anonymity is now a guarantee, not a convention |
@@ -189,6 +189,32 @@ So the vault pins every public input to something it already knows:
 | `txId`       | the proposal being approved |
 | `signerRoot` | the root the owner published |
 | `nullifier`  | the nullifier being recorded |
+
+### The auditor channel, and why ours cannot be opened
+
+The confidential token emits a ciphertext to a registered auditor key on every
+transfer, and the design has no switch for it — amounts are confidential *and*
+auditable, which is the point for regulated users.
+
+What it does not require is that anyone hold the matching secret. An auditor key
+derived by hashing a fixed string onto Grumpkin — rather than as `k·G` — is a
+valid curve point for which no discrete log is known to anyone. Bound to that,
+the channel stays structurally present and is openable by no one.
+
+This deployment does exactly that: the key comes from
+`"stellar-vault/no-auditor/v1"`, and the derivation is published in
+[`spike/confidential-token/nothing-up-my-sleeve.ts`](spike/confidential-token/nothing-up-my-sleeve.ts)
+so the claim is checkable rather than trusted. Verified on testnet — registry
+accepts the key, accounts register against it, transfers settle normally.
+Grumpkin's cofactor is 1, so there is no small-subgroup concern.
+
+`NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_INDEX` switches between this and a real
+auditor keypair, because "confidential and auditable" is the better answer for
+some users and the choice should be explicit rather than baked in.
+
+Open question, asked upstream and not yet answered: whether they consider a
+keyless auditor a sound configuration, or whether something downstream assumes a
+real keypair exists.
 
 ### What the anonymity is, precisely
 
