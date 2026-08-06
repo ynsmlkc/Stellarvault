@@ -13,6 +13,8 @@ export const CONFIG = {
   confidentialTokenId: process.env.NEXT_PUBLIC_CONFIDENTIAL_TOKEN_ID ?? "",
   confidentialVerifierId: process.env.NEXT_PUBLIC_CONFIDENTIAL_VERIFIER_ID ?? "",
   confidentialAuditorId: process.env.NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_ID ?? "",
+  /** The vault-instance WASM the factory currently serves — what an upgrade targets. */
+  vaultWasmHash: process.env.NEXT_PUBLIC_VAULT_WASM_HASH ?? "",
   /** Ledger the confidential token was deployed at — where event replay starts. */
   confidentialFromLedger: Number(process.env.NEXT_PUBLIC_CONFIDENTIAL_FROM_LEDGER ?? "0"),
   network: process.env.NEXT_PUBLIC_NETWORK ?? "testnet",

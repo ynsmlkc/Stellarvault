@@ -29,6 +29,8 @@ import {
   getSpentInWindow,
   getStatus,
   getZkConfig,
+  getVersion,
+  upgradeVault,
   getCall,
   getAllowedContracts,
   getSignerCommitments,
@@ -147,6 +149,8 @@ export default function Page() {
   const [allowedContracts, setAllowedContracts] = useState<string[]>([]);
   // published Merkle leaves, in the shuffled order the owner posted them
   const [commitments, setCommitments] = useState<bigint[]>([]);
+  /** null = pre-versioning vault (v1), which has no upgrade path at all. */
+  const [version, setVersion] = useState<number | null>(null);
   // this signer's own leaf, shown once so they can hand it to the owner
   const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
@@ -155,7 +159,7 @@ export default function Page() {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p, pol, allow, sp, zk, callTargets, leaves] = await Promise.all([
+      const [c, b, p, pol, allow, sp, zk, callTargets, leaves, ver] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
@@ -165,6 +169,7 @@ export default function Page() {
         getZkConfig(addr),
         getAllowedContracts(addr),
         getSignerCommitments(addr),
+        getVersion(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -175,6 +180,7 @@ export default function Page() {
       setZkConfigState(zk);
       setAllowedContracts(callTargets);
       setCommitments(leaves);
+      setVersion(ver);
 
       // guard state per proposal (time-lock, cancellation) — a pre-guards vault
       // returns null for every one of these and the UI simply falls back
@@ -511,6 +517,29 @@ export default function Page() {
     }
   };
 
+  /**
+   * Bring this vault onto the code the factory now serves. Existing vaults keep
+   * whatever they were deployed with — a fix only reaches them through here.
+   */
+  const doUpgrade = async () => {
+    const w = requireWallet();
+    if (!w) return;
+    if (!CONFIG.vaultWasmHash) {
+      showToast({ title: "No target build configured", sub: "NEXT_PUBLIC_VAULT_WASM_HASH is unset.", tone: "err" });
+      return;
+    }
+    setBusy("upgrade");
+    try {
+      await upgradeVault(vaultAddress, w, CONFIG.vaultWasmHash);
+      refreshSoon();
+      showToast({ title: "Vault upgraded", sub: "It now runs the same code new vaults are created with.", tone: "ok" });
+    } catch (e: any) {
+      showToast({ title: "Upgrade failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const doSavePolicy = async (next: Policy) => {
     const w = requireWallet();
     if (!w) return;
@@ -635,7 +664,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -903,6 +932,7 @@ type ShellProps = {
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
+  version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
@@ -957,7 +987,7 @@ function AppShell(p: ShellProps) {
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
           <Confidential
             wallet={p.wallet}
@@ -1745,9 +1775,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
+function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
-  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[];
+  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[]; version: number | null;
+  onUpgrade: () => void;
   onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
   const isOwner = !!wallet && wallet === config?.owner;
@@ -1811,6 +1842,34 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
         <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: 13, color: "#8A857B" }}>
           Read-only — only the vault owner{config?.owner ? ` (${shortAddr(config.owner)})` : ""} can change guards.
         </div>
+      )}
+
+      {/* A vault keeps whatever code it was deployed with; pointing the factory
+          at a newer build only affects vaults created after. So a fix reaches an
+          existing vault through here, or not at all. */}
+      {version === null ? (
+        <div style={{ border: "1px solid rgba(196,93,74,0.3)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 8 }}>OLDEST BUILD</div>
+          <div style={{ fontSize: 13, color: "#8A857B", lineHeight: 1.6 }}>
+            This vault predates versioning and has no upgrade entry point, so it cannot be moved forward — guards, contract calls and hidden amounts will never appear on it. Its funds are safe; create a new vault to use the current features.
+          </div>
+        </div>
+      ) : (
+        version < 4 && (
+          <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
+            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
+            <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
+              This vault runs older code than new vaults are created with, so some features are missing or will fail when executed. Upgrading keeps its address, balance, signers and guards exactly as they are.
+            </div>
+            {isOwner ? (
+              <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
+                {busy === "upgrade" ? "Upgrading…" : "Upgrade this vault"}
+              </button>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only the owner can upgrade it.</div>
+            )}
+          </div>
+        )
       )}
 
       <div style={card}>

@@ -338,6 +338,19 @@ export async function getSignerCommitments(vaultAddr: string): Promise<bigint[]>
 export const setSignerCommitments = (vaultAddr: string, owner: string, commitments: bigint[]) =>
   invoke(vaultAddr, "set_signer_commitments", [xdr.ScVal.scvVec(commitments.map(u256))], owner);
 
+/**
+ * Point this vault at newer code. Owner-gated, and the only way an existing
+ * vault ever gets a fix: `factory.set_wasm` decides what NEW vaults are born
+ * with and leaves everything already deployed exactly where it was.
+ */
+export const upgradeVault = (vaultAddr: string, owner: string, wasmHash: string) =>
+  invoke(
+    vaultAddr,
+    "upgrade",
+    [nativeToScVal(Buffer.from(wasmHash, "hex"), { type: "bytes" })],
+    owner
+  );
+
 export const setZkConfig = (
   vaultAddr: string,
   owner: string,
