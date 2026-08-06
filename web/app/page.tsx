@@ -917,10 +917,22 @@ function AppShell(p: ShellProps) {
             <LogoMark size={28} />
             <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13 }}>STELLAR&nbsp;VAULT</span>
           </div>
-          <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
-            {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
-            {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
+            {/* Guards and the confidential balance belong to ONE vault — its
+                limits, its signer set, its balance. Offering them with no vault
+                open would query an empty address and fail for no visible
+                reason, so they appear once a vault is, labelled with which. */}
+            {p.vaultAddress && (
+              <>
+                <span style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
+                  {p.config?.name || shortContract(p.vaultAddress)}
+                </span>
+                {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
+                {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
+              </>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
