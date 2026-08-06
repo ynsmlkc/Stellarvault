@@ -103,6 +103,29 @@ and `addr_f` parity against the circuits was checked at deploy time.
 Re-verified against this stack, vault `CAETYEOTYEAGZZLIE6GLTLUKK3LZPJCCC6E2BKZ4JWUTEMMUVCTOHQRD`:
 register -> deposit 1000 -> merge -> confidential_transfer 400 -> spendable 600.
 
+### Can the auditor channel be neutered? Mechanically, yes
+
+`nothing-up-my-sleeve.ts` registers an auditor key derived by hashing a fixed
+string onto the curve rather than by computing k·G, so no `k` exists that anyone
+knows. Registered as auditor 1 on our own registry, two accounts bound to it, a
+transfer of 400 executed and settled — the circuits raise no objection.
+
+    nothing-up-my-sleeve auditor key
+      x = 5842be7fb45a89dc5f85c700…
+      on curve: ok, discrete log: unknown to anyone
+    registry accepted it: true
+    transfer accepted on-chain, spendable 1000 -> 600
+
+Grumpkin has cofactor 1, so every valid point is in the prime-order group and
+there is no small-subgroup concern. The ciphertexts are still emitted; they are
+simply openable by nobody.
+
+What this establishes is that it **works**, not that it is **sound** — whether
+the designers consider a keyless auditor an acceptable configuration, or whether
+something downstream assumes a real keypair, is exactly the question to put to
+them. Anyone verifying the claim would need the derivation string published, so
+that the key is checkably nothing-up-my-sleeve rather than merely asserted.
+
 ### The auditor, now that we control it
 
 The design always has one: every transfer emits a ciphertext to the registered
