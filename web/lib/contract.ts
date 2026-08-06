@@ -153,6 +153,7 @@ const VAULT_ERRORS: Record<number, string> = {
   28: "A vault can never call itself — that would let one proposal lift every guard.",
   29: "The call allowlist is full (50 max).",
   30: "Turn on on-chain verification before approving anonymously.",
+  31: "That contract may not act on the vault's behalf — allowlist it first.",
 };
 
 /**
@@ -580,6 +581,7 @@ export const proposeCall = (
       addr(contract),
       xdr.ScVal.scvSymbol(fn),
       xdr.ScVal.scvVec(args.map(argToScVal)),
+      xdr.ScVal.scvVec([]),
       bool(privateMode),
     ],
     proposer
@@ -592,18 +594,36 @@ export const proposeCall = (
  * Callers that build their own payloads — a ZK proof envelope, say — have
  * nothing to type and would only lose fidelity round-tripping through strings.
  */
+export type SubCall = { contract: string; function: string; args: xdr.ScVal[] };
+
+const callSpecScVal = (c: SubCall) =>
+  xdr.ScVal.scvMap([
+    entry("args", xdr.ScVal.scvVec(c.args)),
+    entry("contract", addr(c.contract)),
+    entry("function", xdr.ScVal.scvSymbol(c.function)),
+  ]);
+
 export const proposeCallRaw = (
   vaultAddr: string,
   proposer: string,
   contract: string,
   fn: string,
   args: xdr.ScVal[],
+  /** Calls the callee makes back out as the vault, which it must pre-authorise. */
+  auth: SubCall[] = [],
   privateMode = false
 ) =>
   invoke(
     vaultAddr,
     "propose_call",
-    [addr(proposer), addr(contract), xdr.ScVal.scvSymbol(fn), xdr.ScVal.scvVec(args), bool(privateMode)],
+    [
+      addr(proposer),
+      addr(contract),
+      xdr.ScVal.scvSymbol(fn),
+      xdr.ScVal.scvVec(args),
+      xdr.ScVal.scvVec(auth.map(callSpecScVal)),
+      bool(privateMode),
+    ],
     proposer
   );
 

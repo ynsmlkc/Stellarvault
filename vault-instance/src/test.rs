@@ -732,7 +732,7 @@ fn test_call_requires_an_allowlisted_target() {
     let c = callee(&s);
     // nothing is callable until the owner says so
     assert_eq!(
-        s.vault.try_propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false),
+        s.vault.try_propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false),
         Err(Ok(Error::ContractNotAllowed))
     );
     assert_eq!(s.vault.get_allowed_contracts().len(), 0);
@@ -744,7 +744,7 @@ fn test_allowed_call_executes_as_the_vault() {
     let c = callee(&s);
     s.vault.allow_contract(&c);
 
-    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 5u32.into_val(&s.env)], &false);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 5u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     let spec = s.vault.get_call(&tx).unwrap();
     assert_eq!(spec.contract, c);
 
@@ -767,7 +767,7 @@ fn test_vault_can_never_call_itself() {
         Err(Ok(Error::SelfCallForbidden))
     );
     assert_eq!(
-        s.vault.try_propose_call(&s.signer(0), &s.vault_addr, &Symbol::new(&s.env, "set_policy"), &Vec::new(&s.env), &false),
+        s.vault.try_propose_call(&s.signer(0), &s.vault_addr, &Symbol::new(&s.env, "set_policy"), &Vec::new(&s.env), &Vec::new(&s.env), &false),
         Err(Ok(Error::SelfCallForbidden))
     );
 }
@@ -777,7 +777,7 @@ fn test_revoking_a_target_blocks_a_pending_call() {
     let s = setup(1);
     let c = callee(&s);
     s.vault.allow_contract(&c);
-    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     s.vault.approve(&tx, &s.signer(0));
 
     s.vault.revoke_contract(&c);
@@ -796,7 +796,7 @@ fn test_call_still_needs_the_threshold_and_respects_the_timelock() {
     s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
 
     s.env.ledger().set_sequence_number(200);
-    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false);
 
     s.vault.approve(&tx, &s.signer(0));
     assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::ThresholdNotMet)));
@@ -814,12 +814,12 @@ fn test_call_proposal_can_be_cancelled_and_not_replayed() {
     let s = setup(1);
     let c = callee(&s);
     s.vault.allow_contract(&c);
-    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &false);
+    let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     s.vault.cancel(&tx, &s.signer(0));
     assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::AlreadyCancelled)));
 
     // and an executed call cannot run twice
-    let tx2 = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 2u32.into_val(&s.env)], &false);
+    let tx2 = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 2u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     s.vault.approve(&tx2, &s.signer(0));
     s.vault.execute(&tx2, &s.signer(0));
     assert_eq!(s.vault.try_execute(&tx2, &s.signer(0)), Err(Ok(Error::AlreadyExecuted)));
@@ -843,6 +843,7 @@ fn test_call_moves_a_token_the_vault_was_not_created_with() {
         &other.address(),
         &Symbol::new(&s.env, "transfer"),
         &vec![&s.env, s.vault_addr.into_val(&s.env), recipient.into_val(&s.env), 400i128.into_val(&s.env)],
+        &Vec::new(&s.env),
         &false,
     );
     s.vault.approve(&tx, &s.signer(0));
@@ -915,4 +916,99 @@ fn test_anon_approval_cannot_be_replayed_or_double_counted() {
     );
     assert_eq!(s.vault.get_proposal(&a).approval_count, 1);
     assert_eq!(s.vault.get_proposal(&b).approval_count, 0);
+}
+
+/// A callee that moves the caller's funds — the shape that broke in testing.
+/// `deposit` on a confidential token does exactly this: it calls the underlying
+/// asset's `transfer(from = vault, …)`, one level below the vault's own call.
+#[contract]
+pub struct Puller;
+
+#[contractimpl]
+impl Puller {
+    pub fn pull(env: Env, token: Address, from: Address, amount: i128) {
+        TokenClient::new(&env, &token).transfer(&from, &env.current_contract_address(), &amount);
+    }
+}
+
+/// Without pre-authorisation the host refuses the nested transfer, however the
+/// proposal was approved: a contract's own authority covers only what it invokes
+/// directly.
+#[test]
+fn test_nested_call_needs_explicit_authorisation() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let puller = s.env.register(Puller, ());
+    s.vault.allow_contract(&puller);
+
+    let args = vec![
+        &s.env,
+        s.token.address.into_val(&s.env),
+        s.vault_addr.into_val(&s.env),
+        400i128.into_val(&s.env),
+    ];
+
+    // no auth list -> the sub-call is unauthorised
+    let tx = s.vault.propose_call(&s.signer(0), &puller, &symbol_short!("pull"), &args, &Vec::new(&s.env), &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err(), "nested transfer must not go through unauthorised");
+    assert_eq!(s.token.balance(&puller), 0);
+}
+
+#[test]
+fn test_nested_call_succeeds_when_authorised() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let puller = s.env.register(Puller, ());
+    s.vault.allow_contract(&puller);
+    s.vault.allow_contract(&s.token.address); // the sub-call target, too
+
+    let args = vec![
+        &s.env,
+        s.token.address.into_val(&s.env),
+        s.vault_addr.into_val(&s.env),
+        400i128.into_val(&s.env),
+    ];
+    let auth = vec![
+        &s.env,
+        crate::CallSpec {
+            contract: s.token.address.clone(),
+            function: Symbol::new(&s.env, "transfer"),
+            args: vec![
+                &s.env,
+                s.vault_addr.into_val(&s.env),
+                puller.into_val(&s.env),
+                400i128.into_val(&s.env),
+            ],
+        },
+    ];
+
+    let tx = s.vault.propose_call(&s.signer(0), &puller, &symbol_short!("pull"), &args, &auth, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+
+    assert_eq!(s.token.balance(&puller), 400, "the callee pulled the funds");
+    assert_eq!(s.vault.get_balance(), 600);
+}
+
+/// Authorising a sub-call is a larger permission than making one, so it cannot
+/// be granted to a contract the owner never allowlisted.
+#[test]
+fn test_auth_target_must_be_allowlisted() {
+    let s = setup(1);
+    let puller = s.env.register(Puller, ());
+    s.vault.allow_contract(&puller); // but NOT the token
+
+    let auth = vec![
+        &s.env,
+        crate::CallSpec {
+            contract: s.token.address.clone(),
+            function: Symbol::new(&s.env, "transfer"),
+            args: Vec::new(&s.env),
+        },
+    ];
+    assert_eq!(
+        s.vault.try_propose_call(&s.signer(0), &puller, &symbol_short!("pull"), &Vec::new(&s.env), &auth, &false),
+        Err(Ok(Error::ContractNotAllowed))
+    );
 }

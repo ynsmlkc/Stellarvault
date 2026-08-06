@@ -153,6 +153,26 @@ export async function buildDepositArgs(vaultAddress: string, amount: bigint): Pr
   ];
 }
 
+/**
+ * The sub-call `deposit` makes as the vault: it pulls the XLM from the vault
+ * into the token contract's reserves. One level below our own call, so the
+ * vault has to name it or the host refuses with Error(Auth, InvalidAction).
+ */
+export async function buildDepositAuth(vaultAddress: string, amount: bigint) {
+  const { Address, nativeToScVal } = await import("@stellar/stellar-sdk");
+  return [
+    {
+      contract: CONFIG.tokenId,
+      function: "transfer",
+      args: [
+        new Address(vaultAddress).toScVal(),
+        new Address(CONFIG.confidentialTokenId).toScVal(),
+        nativeToScVal(amount, { type: "i128" }),
+      ],
+    },
+  ];
+}
+
 /** Args for `merge` — folding receiving into spendable. No proof needed. */
 export async function buildMergeArgs(vaultAddress: string): Promise<any[]> {
   const { Address } = await import("@stellar/stellar-sdk");

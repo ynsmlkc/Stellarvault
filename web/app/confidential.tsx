@@ -20,13 +20,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CONFIG, shortAddr, formatXLM, contractExplorerUrl } from "@/lib/stellar";
-import { proposeCallRaw, allowContract, getAllowedContracts, describeError } from "@/lib/contract";
+import { proposeCallRaw, allowContract, getAllowedContracts, describeError, type SubCall } from "@/lib/contract";
 import {
   vaultConfidentialKey,
   readConfidentialBalance,
   isRegistered as checkRegistered,
   buildRegisterArgs,
   buildDepositArgs,
+  buildDepositAuth,
   buildMergeArgs,
   buildTransferArgs,
   type ConfidentialBalance,
@@ -130,14 +131,26 @@ export default function Confidential({
    * still have to approve — the same rule as any other spend, which is the
    * point, but easy to miss when a button says "Send".
    */
-  const propose = (label: string, human: string, fn: string, build: () => Promise<any[]>) =>
+  const propose = (
+    label: string,
+    human: string,
+    fn: string,
+    build: () => Promise<any[]>,
+    buildAuth?: () => Promise<SubCall[]>
+  ) =>
     run(label, async () => {
       if (!wallet) throw new Error("Connect a wallet first.");
+      const auth = buildAuth ? await buildAuth() : [];
+
+      // The token must be callable; anything it calls back out as the vault
+      // must be too, since authorising a sub-call is the larger permission.
       const allowed = await getAllowedContracts(vaultAddress);
-      if (!allowed.includes(CONFIG.confidentialTokenId)) {
-        await allowContract(vaultAddress, wallet, CONFIG.confidentialTokenId);
+      const needed = [CONFIG.confidentialTokenId, ...auth.map((a) => a.contract)];
+      for (const c of needed) {
+        if (!allowed.includes(c)) await allowContract(vaultAddress, wallet, c);
       }
-      await proposeCallRaw(vaultAddress, wallet, CONFIG.confidentialTokenId, fn, await build());
+
+      await proposeCallRaw(vaultAddress, wallet, CONFIG.confidentialTokenId, fn, await build(), auth);
       setLastProposal(human);
       onProposed(human);
     });
@@ -232,7 +245,16 @@ export default function Confidential({
         <div style={{ display: "flex", gap: 8 }}>
           <input value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0.00 XLM" disabled={!registered} style={{ ...input, flex: 1 }} />
           <button
-            onClick={() => propose("deposit", "Moving XLM into the hidden balance", "deposit", () => buildDepositArgs(vaultAddress, toStroops(depositAmount)))}
+            onClick={() =>
+              propose(
+                "deposit",
+                "Moving XLM into the hidden balance",
+                "deposit",
+                () => buildDepositArgs(vaultAddress, toStroops(depositAmount)),
+                // deposit pulls the XLM itself, one level below our call
+                () => buildDepositAuth(vaultAddress, toStroops(depositAmount))
+              )
+            }
             disabled={!!busy || !registered || !depositAmount.trim()}
             style={{ ...gold, width: "auto", padding: "0 20px", opacity: registered && depositAmount.trim() && !busy ? 1 : 0.45 }}
           >{busy === "deposit" ? "…" : "Move in"}</button>
