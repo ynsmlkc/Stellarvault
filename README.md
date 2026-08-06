@@ -77,19 +77,26 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 ```
 ┌──────────────────────────── STELLAR VAULT dApp ────────────────────────────┐
 │                                                                            │
-│   Next.js 14 + Freighter            Stellar Testnet (Soroban)              │
-│   ┌────────────────┐    reads/      ┌───────────────────────────────────┐  │
-│   │  web/          │───writes──────▶│  Vault Contract (stellar-vault/)  │  │
-│   │  Vault Gold UI │   (signed)     │  • dual-mode propose               │  │
-│   │  snarkjs prover│                │  • approve  / approve_zk           │  │
-│   └───────┬────────┘                │  • execute  / execute_confidential │  │
-│           │ generates                └─────────────┬─────────────────────┘  │
-│           ▼                                         │ (roadmap)              │
-│   voteApproval.circom                               ▼                        │
-│   real Groth16 proof              ┌───────────────────────────────────┐    │
-│   (anonymous signer approval)     │  Nethermind Pool + Groth16 Verifier│    │
-│                                   │  (confidential execution layer)    │    │
-│                                   └───────────────────────────────────┘    │
+│   Next.js 14 + Freighter          Stellar Testnet (Soroban, protocol 27)   │
+│   ┌──────────────────┐            ┌──────────────────────────────────────┐ │
+│   │  web/            │  create    │  vault-factory                       │ │
+│   │  Vault Gold UI   │───────────▶│  one contract per vault + registry   │ │
+│   │                  │            └──────────────┬───────────────────────┘ │
+│   │  snarkjs prover  │                           │ deploys                 │
+│   │  (voteApproval)  │            ┌──────────────▼───────────────────────┐ │
+│   │                  │  reads /   │  vault-instance                      │ │
+│   │  bb.js prover    │──writes───▶│  • propose / propose_batch           │ │
+│   │  (confidential)  │  (signed)  │  • propose_call → any allowlisted    │ │
+│   └──────────────────┘            │  • approve / approve_zk_anon         │ │
+│                                   │  • execute, under the guards:        │ │
+│                                   │    limit · cap · time-lock · allow   │ │
+│                                   └────┬──────────────────────┬──────────┘ │
+│                                        │ verifies             │ calls      │
+│                          ┌─────────────▼────────┐  ┌──────────▼──────────┐ │
+│                          │  groth16-verifier    │  │  confidential token │ │
+│                          │  BN254, our vk       │  │  (OpenZeppelin)     │ │
+│                          │  who approved: hidden│  │  amounts: hidden    │ │
+│                          └──────────────────────┘  └─────────────────────┘ │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -247,7 +254,6 @@ web/               Next.js 14 dApp (Vault Gold UI, Freighter, snarkjs + confiden
 spike/             bounded experiments kept as evidence (BN254 availability, confidential tokens)
 deployments/       testnet addresses and what each deployment changed
 docs/              architecture, ZK, roadmap, hackathon record
-stellar-vault/     earlier single-contract design (pre-factory) — kept for the migration story
 ```
 
 ---

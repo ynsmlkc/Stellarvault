@@ -84,4 +84,4 @@ Confirm the exact SDK-23 API, return type, and that constructor args reach the i
 ## Minor notes (not blockers)
 - **Cost:** deploy-per-vault costs more than a storage record (instance creation + WASM rent). Negligible on testnet; worth a sentence in the README's trade-offs.
 - The `voteApproval` / `confidentialTransfer` circuits + the `shield-pool` contract are **untouched** by A — only the vault-instance/factory + the frontend's vault layer change.
-- Keep `stellar-vault` (the B crate) in the repo even after A wins — it documents the B approach and the migration story.
+- ~~Keep `stellar-vault` (the B crate) in the repo even after A wins~~ — it was kept for a while, then removed on 2026-08-06: the architecture diagram still pointed at it as though it were the live contract, which misled more than the migration story helped. Git history keeps it.
