@@ -5,12 +5,20 @@ export const CONFIG = {
   demoVault: process.env.NEXT_PUBLIC_DEMO_VAULT ?? "",
   vaultId: process.env.NEXT_PUBLIC_VAULT_CONTRACT_ID ?? "",
   tokenId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
-  poolId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",
-  shieldPoolId: process.env.NEXT_PUBLIC_SHIELD_POOL_ID ?? "",
   /** Nethermind's verifier — explored in Faz 4, keyed to their circuit, unused. */
   verifierId: process.env.NEXT_PUBLIC_VERIFIER_CONTRACT_ID ?? "",
   /** Our Groth16 verifier, keyed to voteApproval.circom. */
   groth16VerifierId: process.env.NEXT_PUBLIC_GROTH16_VERIFIER_ID ?? "",
+  /** Confidential token stack (OpenZeppelin), wrapping the native XLM SAC. */
+  confidentialTokenId: process.env.NEXT_PUBLIC_CONFIDENTIAL_TOKEN_ID ?? "",
+  confidentialVerifierId: process.env.NEXT_PUBLIC_CONFIDENTIAL_VERIFIER_ID ?? "",
+  confidentialAuditorId: process.env.NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_ID ?? "",
+  /** Which auditor a new confidential account binds to. See .env.production. */
+  confidentialAuditorIndex: Number(process.env.NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_INDEX ?? "0"),
+  /** The vault-instance WASM the factory currently serves — what an upgrade targets. */
+  vaultWasmHash: process.env.NEXT_PUBLIC_VAULT_WASM_HASH ?? "",
+  /** Ledger the confidential token was deployed at — where event replay starts. */
+  confidentialFromLedger: Number(process.env.NEXT_PUBLIC_CONFIDENTIAL_FROM_LEDGER ?? "0"),
   network: process.env.NEXT_PUBLIC_NETWORK ?? "testnet",
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",
 };

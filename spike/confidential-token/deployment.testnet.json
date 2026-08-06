@@ -1,0 +1,23 @@
+{
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "passphrase": "Test SDF Network ; September 2015",
+  "deployedAtLedger": 3984917,
+  "contracts": {
+    "token": "CDTZAT6D3XYS43A5Z6KVXZIFCBIVLBNO4R75OF2WWLCMCWZDQNBI3W2K",
+    "verifier": "CCB4WJQHSKSY2KF6BYZ6IUISTERRBGLHM5WU4E6CLWW2E4QOSMDVKRNZ",
+    "auditor": "CDJAFGSWQSYV32IMG5B7LYOULDJDCZM3AOSNSFV76YKDSEYZ34L5VGOW",
+    "underlying": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "allowlist": "CC5VE5LHHA6TXXWLT4MYTO7NRC2WJGF4UDNGDCBR3FS3RVNJ6ZZETFMH",
+    "blocklist": "CCTN7HN4FRGL763VG7OPC5XIXAKWRLH5O7JPLRM2Y45AQGI23M6A7QMD",
+    "factory": "CBXH5SYQ73KMM5F5FNWQGFK3TYXJL6LFYLYSOCWSHTH2P34WZ3QS4DQV"
+  },
+  "auditor": {
+    "id": 0,
+    "secretHex": "REDACTED \u2014 held locally by the deployer; regenerate with pnpm deploy:contracts",
+    "keyXHex": "0x0ae8f3e333433ce0cf7d9aaa2cb96164baa042dda4b992092ab9ac8f7190e8fa",
+    "keyYHex": "0x2c9d5f835fc9a6e89d15b9090816d74cea2f0dd8d2ea744eabeb77b11abaeb23"
+  },
+  "addrF": "0x1a7d6b8b8aa68c091efdc69e6ddfe64c18f7f2262f691d965285b7da21fbc49e",
+  "_note": "Our own confidential-token stack. The auditor secret is deliberately not committed."
+}

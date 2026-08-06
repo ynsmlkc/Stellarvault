@@ -159,3 +159,45 @@ First vault from the upgraded factory: CD6KZV2ZVXTD7PERRTCPPMNHKPH6ZPFMZ72PSPGDQ
 NOTE: the new key derivation is incompatible with the old one. A vault that had
 verification enabled before this must republish its signer set, or its members'
 proofs will no longer verify.
+
+---
+
+## Factory v2 + confidential token (2026-08-06)
+
+FACTORY_ID = CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW
+  Replaces CBL2WDAF… . Redeployed rather than upgraded because the first
+  factory shipped WITHOUT an `upgrade` entry point, so its registry could never
+  gain a feature — which is exactly the gap this version closes:
+    upgrade()        admin-gated code replacement, so this never recurs
+    forget_vault()   drop a vault from an owner's listing
+    remember_vault() put it back, or adopt one from an older factory
+
+  Serves vault-instance d4557e7af97a55ef796c18bd1afa5ab6eebabfdb1d2fd955bdc86d96f5735794
+
+vault-instance d4557e7a… adds `auth` to propose_call: the sub-calls a callee
+makes back out as the vault, passed to authorize_as_current_contract. Without
+it a confidential-token deposit fails with Error(Auth, InvalidAction) no matter
+how the proposal was approved — a contract's own authority covers only what it
+invokes directly.
+
+CONFIDENTIAL TOKEN (ours, wraps native XLM SAC):
+  token    = CDTZAT6D3XYS43A5Z6KVXZIFCBIVLBNO4R75OF2WWLCMCWZDQNBI3W2K
+  verifier = CCB4WJQHSKSY2KF6BYZ6IUISTERRBGLHM5WU4E6CLWW2E4QOSMDVKRNZ
+  auditor  = CDJAFGSWQSYV32IMG5B7LYOULDJDCZM3AOSNSFV76YKDSEYZ34L5VGOW
+
+### Vaults orphaned by the factory swap
+
+Still on-chain, still holding their balances, reachable by address — just not
+listed by the new factory. `remember_vault` re-adopts any of them.
+
+  CARUB5XKUJ4ENTFBUKMLFSNQ3IZI6VF6CZPKMEVXGN3ZRR6F75NF7C5F   v1   0 XLM
+  CDJ4PACY2ZGNUMY6DLEXIKM3ZL452GCPHGRH67BITEUEG757QWXWEBEY   v1  30 XLM
+  CCQLX55QPGGR3MBEZQE3PORQFORZ6I7W5RRMSY5PDIZ2AZPWEFWVXRAE   v1  50 XLM
+  CDTENMPMIUR2EZ6R3XL3X76CR6UUKL3NFAOWME4J4M2AGVKM5YU7HBSH   v2 100 XLM
+  CBDBIXD5UUJK2PC3LEQLOG6TS2DPA5RALYNTABG4PN6ZBVWN56YRKT5Z   v3   0 XLM
+  CAWEJEQOGZ7CGNTFKU5QMTP4PS2EX5WGLZ6LCFSDLNUQNZ55ZRXURGKB   v4 100 XLM
+  CCNLZB2SXXVYAZSFANW2F465EMNSRTKP3LX463XHJ3FYGJXMCUQEGTOU   v4   0 XLM
+  CDY4PBWCMF6UDIJTXO3HOOWJWWZML5ZWKIPIVTSNRGSV2IYQW3XE4FCQ   v4 100 XLM
+
+  The three v1 vaults have no `upgrade` entry point and can never run current
+  code. The rest can be upgraded from Guards.

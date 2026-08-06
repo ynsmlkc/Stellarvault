@@ -18,6 +18,13 @@ const COUNTER: Symbol = symbol_short!("counter");
 
 #[contractevent]
 #[derive(Clone)]
+pub struct VaultForgotten {
+    #[topic] pub owner: Address,
+    pub vault: Address,
+}
+
+#[contractevent]
+#[derive(Clone)]
 pub struct VaultCreated {
     #[topic] pub owner: Address,
     pub vault: Address,
@@ -83,6 +90,54 @@ impl VaultFactory {
         let admin: Address = env.storage().instance().get(&ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&WASM, &new_wasm_hash);
+    }
+
+    /// Admin: replace this factory's own code.
+    ///
+    /// The first factory shipped without this, which turned out to matter: the
+    /// registry lives here, so the only way to add anything — like
+    /// [`forget_vault`] — was to deploy a second factory and abandon every
+    /// vault the first one had recorded. A registry you cannot extend without
+    /// discarding is a registry with a shelf life.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&ADMIN).unwrap();
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Drop a vault from `owner`'s list.
+    ///
+    /// The vault is untouched: it keeps its address, its balance and its
+    /// signers, and anyone holding the address can still reach it. This only
+    /// stops it being enumerated here, which is the difference between a
+    /// dashboard someone can tidy and one that accumulates forever. Deleting a
+    /// vault is not on offer, and should not be — it would mean destroying
+    /// whatever it holds.
+    pub fn forget_vault(env: Env, owner: Address, vault: Address) {
+        owner.require_auth();
+        let list: Vec<Address> = env.storage().persistent().get(&owner).unwrap_or(Vec::new(&env));
+        let mut next = Vec::new(&env);
+        for v in list.iter() {
+            if v != vault {
+                next.push_back(v);
+            }
+        }
+        env.storage().persistent().set(&owner, &next);
+        VaultForgotten { owner, vault }.publish(&env);
+    }
+
+    /// Put a vault back on `owner`'s list — or add one they were never
+    /// registered for, such as a vault created by an earlier factory.
+    pub fn remember_vault(env: Env, owner: Address, vault: Address) {
+        owner.require_auth();
+        let mut list: Vec<Address> = env.storage().persistent().get(&owner).unwrap_or(Vec::new(&env));
+        for v in list.iter() {
+            if v == vault {
+                return; // idempotent
+            }
+        }
+        list.push_back(vault);
+        env.storage().persistent().set(&owner, &list);
     }
 
     /// All vaults created by `owner` (for the dashboard list, survives browser clear).

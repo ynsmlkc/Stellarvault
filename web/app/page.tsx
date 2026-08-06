@@ -29,6 +29,8 @@ import {
   getSpentInWindow,
   getStatus,
   getZkConfig,
+  getVersion,
+  upgradeVault,
   getCall,
   getAllowedContracts,
   getSignerCommitments,
@@ -53,7 +55,7 @@ import {
   type CallSpec,
 } from "@/lib/contract";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
-import Shield from "./shield";
+import Confidential from "./confidential";
 
 /* ============================ tokens ============================ */
 const DISPLAY = "'Newsreader',serif";
@@ -65,6 +67,30 @@ const GRAD_B = "linear-gradient(135deg,#bda07f,#6f5b3d)";
 const GRAD_C = "linear-gradient(135deg,#a99272,#5e4e34)";
 const GRADS = [GRAD_A, GRAD_B, GRAD_C];
 
+/**
+ * Vaults the user has chosen not to see.
+ *
+ * A vault cannot be deleted — it is a deployed contract holding real balances,
+ * and the factory has no `upgrade`, so its registry can never learn to forget
+ * one either. Hiding is therefore local and reversible: the vault keeps its
+ * address, its funds and its listing on-chain; this only stops it filling the
+ * dashboard. Nothing here can lose anything.
+ */
+const hiddenKey = (w: string) => `sv_hidden_${CONFIG.factoryId}_${w}`;
+const loadHidden = (w: string | null): string[] => {
+  if (!w || typeof localStorage === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(hiddenKey(w)) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const saveHidden = (w: string, list: string[]) => {
+  try {
+    localStorage.setItem(hiddenKey(w), JSON.stringify(list));
+  } catch {}
+};
+
 // remember which (vault, tx) this wallet already approved → avoid re-click errors
 const apprKey = (v: string, t: number, w: string) => `sv_appr_${v}_${t}_${w}`;
 const didApprove = (v: string, t: number, w: string | null) =>
@@ -75,7 +101,7 @@ const markApproved = (v: string, t: number, w: string) => {
   } catch {}
 };
 
-type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "shield" | "guards";
+type Screen = "landing" | "connect" | "dashboard" | "create" | "vault" | "propose" | "guards" | "confidential";
 type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
@@ -147,6 +173,8 @@ export default function Page() {
   const [allowedContracts, setAllowedContracts] = useState<string[]>([]);
   // published Merkle leaves, in the shuffled order the owner posted them
   const [commitments, setCommitments] = useState<bigint[]>([]);
+  /** null = pre-versioning vault (v1), which has no upgrade path at all. */
+  const [version, setVersion] = useState<number | null>(null);
   // this signer's own leaf, shown once so they can hand it to the owner
   const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
@@ -155,7 +183,7 @@ export default function Page() {
     if (!addr) return;
     setLoading(true);
     try {
-      const [c, b, p, pol, allow, sp, zk, callTargets, leaves] = await Promise.all([
+      const [c, b, p, pol, allow, sp, zk, callTargets, leaves, ver] = await Promise.all([
         getVault(addr),
         getVaultBalance(addr),
         getProposals(addr),
@@ -165,6 +193,7 @@ export default function Page() {
         getZkConfig(addr),
         getAllowedContracts(addr),
         getSignerCommitments(addr),
+        getVersion(addr),
       ]);
       setConfig(c);
       setBalance(b);
@@ -175,6 +204,7 @@ export default function Page() {
       setZkConfigState(zk);
       setAllowedContracts(callTargets);
       setCommitments(leaves);
+      setVersion(ver);
 
       // guard state per proposal (time-lock, cancellation) — a pre-guards vault
       // returns null for every one of these and the UI simply falls back
@@ -511,6 +541,29 @@ export default function Page() {
     }
   };
 
+  /**
+   * Bring this vault onto the code the factory now serves. Existing vaults keep
+   * whatever they were deployed with — a fix only reaches them through here.
+   */
+  const doUpgrade = async () => {
+    const w = requireWallet();
+    if (!w) return;
+    if (!CONFIG.vaultWasmHash) {
+      showToast({ title: "No target build configured", sub: "NEXT_PUBLIC_VAULT_WASM_HASH is unset.", tone: "err" });
+      return;
+    }
+    setBusy("upgrade");
+    try {
+      await upgradeVault(vaultAddress, w, CONFIG.vaultWasmHash);
+      refreshSoon();
+      showToast({ title: "Vault upgraded", sub: "It now runs the same code new vaults are created with.", tone: "ok" });
+    } catch (e: any) {
+      showToast({ title: "Upgrade failed", sub: cleanErr(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const doSavePolicy = async (next: Policy) => {
     const w = requireWallet();
     if (!w) return;
@@ -624,7 +677,7 @@ export default function Page() {
     }
   };
 
-  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "shield" || screen === "guards";
+  const isApp = screen === "dashboard" || screen === "create" || screen === "vault" || screen === "propose" || screen === "guards" || screen === "confidential";
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", position: "relative", background: "#0A0A0B" }}>
@@ -635,7 +688,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -770,8 +823,8 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           {[
             ["Safe-style factory", "One contract per vault"],
             ["Per-transaction privacy", "Transparent or private, your call"],
-            ["ZK voter privacy", "Hide who approved (Groth16)"],
-            ["Shielded pool", "Hide amount + recipient"],
+            ["ZK voter privacy", "Hide who approved (Groth16, verified on-chain)"],
+            ["Confidential balances", "Hide amounts, on a SEP-41 standard"],
           ].map(([t, d]) => (
             <div key={t} style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: "16px 18px" }}>
               <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 4 }}>{t}</div>
@@ -808,7 +861,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
           <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 16, background: "linear-gradient(180deg,#101010,#0c0c0d)", padding: 30, overflow: "hidden" }}>
             <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.018) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#8A857B" }}>🔒 PRIVATE · ZK</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#8A857B" }}>🕶 ANONYMOUS APPROVALS</span>
               <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>RECEIPT #4472</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -902,9 +955,15 @@ type ShellProps = {
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
+  onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
+  version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
+  /** Screens that act on one specific vault rather than the account as a whole. */
+  const inVault =
+    p.screen === "vault" || p.screen === "propose" || p.screen === "guards" || p.screen === "confidential";
+
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
     <button onClick={onClick} className="h-nav" style={{ background: "transparent", border: "none", color: active ? "#ECE7DD" : "#8A857B", fontFamily: SANS, fontSize: 13, padding: "7px 12px", borderRadius: 7, cursor: "pointer" }}>{label}</button>
   );
@@ -916,10 +975,23 @@ function AppShell(p: ShellProps) {
             <LogoMark size={28} />
             <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13 }}>STELLAR&nbsp;VAULT</span>
           </div>
-          <div style={{ display: "flex", gap: 6, fontSize: 13 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
-            {navBtn("🔒 Confidential", p.screen === "shield", () => p.go("shield"))}
-            {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
+            {/* Guards and the confidential balance belong to ONE vault — its
+                limits, its signer set, its balance. They show only while you
+                are inside that vault: gating on "a vault is selected" is not
+                enough, because the selection survives navigating back to the
+                list, which is exactly where they do not belong. */}
+            {inVault && p.vaultAddress && (
+              <>
+                <span style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
+                  {p.config?.name || shortContract(p.vaultAddress)}
+                </span>
+                {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
+                {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
+              </>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -939,8 +1011,19 @@ function AppShell(p: ShellProps) {
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
-        {p.screen === "shield" && <Shield wallet={p.wallet} onBack={() => p.go("dashboard")} />}
+        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
+        {p.screen === "confidential" && (
+          <Confidential
+            wallet={p.wallet}
+            vaultAddress={p.vaultAddress}
+            publicBalance={p.balance}
+            fromLedger={CONFIG.confidentialFromLedger}
+            onBack={() => p.go("vault")}
+            onGoToVault={() => p.go("vault")}
+            onProposed={p.onConfidentialProposed}
+            onError={p.onConfidentialError}
+          />
+        )}
       </div>
     </div>
   );
@@ -951,6 +1034,17 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
   const pending = proposals.filter((x) => !x.executed).length;
   const [myVaults, setMyVaults] = useState<{ address: string; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
   const [loadingVaults, setLoadingVaults] = useState(true);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
+
+  useEffect(() => setHidden(loadHidden(wallet)), [wallet]);
+
+  const toggleHidden = (addr: string) => {
+    if (!wallet) return;
+    const next = hidden.includes(addr) ? hidden.filter((a) => a !== addr) : [...hidden, addr];
+    setHidden(next);
+    saveHidden(wallet, next);
+  };
 
   useEffect(() => {
     if (!wallet) {
@@ -1003,8 +1097,8 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
       )}
       <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
         {loadingVaults && wallet && [0, 1, 2].map((i) => <VaultCardSkeleton key={i} />)}
-        {!loadingVaults && myVaults.map((v) => (
-          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live />
+        {!loadingVaults && myVaults.filter((v) => showHidden || !hidden.includes(v.address)).map((v) => (
+          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live hidden={hidden.includes(v.address)} onToggleHidden={() => toggleHidden(v.address)} />
         ))}
         {!loadingVaults && !myVaults.length && wallet && (
           <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
@@ -1013,6 +1107,14 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
         )}
       </div>
 
+      {hidden.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "#5a564d", marginTop: -14, marginBottom: 24 }}>
+          {hidden.length} vault{hidden.length === 1 ? "" : "s"} hidden — still on-chain, still holding whatever they hold.{" "}
+          <span onClick={() => setShowHidden(!showHidden)} style={{ color: "#C9A86A", cursor: "pointer" }}>
+            {showHidden ? "hide them again" : "show them"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1038,10 +1140,17 @@ function VaultCardSkeleton() {
   );
 }
 
-function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void }) {
+function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick, hidden, onToggleHidden }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void; hidden?: boolean; onToggleHidden?: () => void }) {
   return (
     <div onClick={onClick} className={gold ? "h-cardgold" : "h-card"} style={{ position: "relative", border: gold ? "1px solid rgba(201,168,106,0.24)" : "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: gold ? "linear-gradient(180deg,#15140f,#111110)" : "#121211", padding: 24, cursor: "pointer", overflow: "hidden" }}>
       {gold && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />}
+      {onToggleHidden && (
+        <span
+          onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
+          title={hidden ? "Show on the dashboard again" : "Hide from the dashboard — the vault and its funds are untouched"}
+          style={{ position: "absolute", top: 10, right: 12, fontFamily: MONO, fontSize: 10.5, color: "#46433c", cursor: "pointer", letterSpacing: ".08em" }}
+        >{hidden ? "unhide" : "hide"}</span>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>{name}{live && <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "1px 5px" }}>LIVE</span>}</div>
@@ -1414,7 +1523,7 @@ function PrivateTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
       <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🔒 PRIVATE · ZK{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🕶 ANONYMOUS APPROVALS{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
@@ -1515,11 +1624,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
         <div style={{ position: "absolute", top: 5, bottom: 5, left: 5, width: "calc(50% - 5px)", borderRadius: 9, background: isPrivate ? "rgba(236,231,221,0.04)" : "rgba(201,168,106,0.12)", border: `1px solid ${isPrivate ? "rgba(236,231,221,0.16)" : "rgba(201,168,106,0.45)"}`, transition: "transform .32s cubic-bezier(.4,0,.2,1),background .32s,border-color .32s", transform: isPrivate ? "translateX(100%)" : "translateX(0)" }} />
         <button onClick={() => setMode("transparent")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#8A857B" : "#C9A86A" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>◎ Transparent</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Public &amp; auditable</span>
+          <span style={{ fontSize: 11, color: "#8A857B" }}>Everything visible</span>
         </button>
         <button onClick={() => setMode("private")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#ECE7DD" : "#8A857B" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>🔒 Private · ZK</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Confidential transfer</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>🕶 Anonymous approvals</span>
+          <span style={{ fontSize: 11, color: "#8A857B" }}>Hides who approved</span>
         </button>
       </div>
 
@@ -1640,7 +1749,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
               <div>
                 <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>Approver identities will be hidden</div>
-                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount &amp; recipient (they approve it), but each approval is a zero-knowledge proof — the chain records only a nullifier, never <span style={{ color: "#ECE7DD" }}>who</span> signed. To also hide the amount &amp; recipient from everyone, use the 🔒 Confidential pool.</div>
+                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount and recipient — they are approving it — but each approval is a zero-knowledge proof, so the chain records only a nullifier and never <span style={{ color: "#ECE7DD" }}>who</span> signed. This hides the approvers, not the amount. To hide <span style={{ color: "#ECE7DD" }}>how much</span>, pay from the vault&apos;s hidden balance instead.</div>
               </div>
             </div>
           )}
@@ -1676,9 +1785,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                kind === "call"
-                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
-                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                {kind === "call" ? (
+                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                ) : (
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.08)" }} />
                 <Row label="Approvals" value="visible to all" />
               </div>
@@ -1686,13 +1797,15 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
           ) : (
             <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(236,231,221,0.1)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
-              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🔒 PRIVATE · ZK</span>
+              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🕶 ANONYMOUS APPROVALS</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
-                kind === "call"
-                  ? <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
-                  : <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                {kind === "call" ? (
+                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                ) : (
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
@@ -1712,9 +1825,10 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
+function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
-  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[];
+  policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[]; version: number | null;
+  onUpgrade: () => void;
   onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
   const isOwner = !!wallet && wallet === config?.owner;
@@ -1778,6 +1892,34 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
         <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: 13, color: "#8A857B" }}>
           Read-only — only the vault owner{config?.owner ? ` (${shortAddr(config.owner)})` : ""} can change guards.
         </div>
+      )}
+
+      {/* A vault keeps whatever code it was deployed with; pointing the factory
+          at a newer build only affects vaults created after. So a fix reaches an
+          existing vault through here, or not at all. */}
+      {version === null ? (
+        <div style={{ border: "1px solid rgba(196,93,74,0.3)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 8 }}>OLDEST BUILD</div>
+          <div style={{ fontSize: 13, color: "#8A857B", lineHeight: 1.6 }}>
+            This vault predates versioning and has no upgrade entry point, so it cannot be moved forward — guards, contract calls and hidden amounts will never appear on it. Its funds are safe; create a new vault to use the current features.
+          </div>
+        </div>
+      ) : (
+        version < 4 && (
+          <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
+            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
+            <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
+              This vault runs older code than new vaults are created with, so some features are missing or will fail when executed. Upgrading keeps its address, balance, signers and guards exactly as they are.
+            </div>
+            {isOwner ? (
+              <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
+                {busy === "upgrade" ? "Upgrading…" : "Upgrade this vault"}
+              </button>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only the owner can upgrade it.</div>
+            )}
+          </div>
+        )
       )}
 
       <div style={card}>

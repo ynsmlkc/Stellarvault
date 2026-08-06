@@ -6,7 +6,7 @@
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
 [![CI](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml/badge.svg)](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml)
-[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
+[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW)
 [![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2027-C9A86A)](vault-instance/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
 
@@ -23,7 +23,7 @@ There is no **confidential** multi-sig on Stellar, and no programmable one. That
 
 ## The solution
 
-A Soroban **smart-contract** multi-sig where the initiator picks the privacy level **per transaction** — plus a shielded pool for fully confidential transfers:
+A Soroban **smart-contract** multi-sig where the initiator picks the privacy level **per transaction** — plus a confidential balance where amounts never touch the ledger:
 
 |                    | **Transparent**          | **Private (ZK)**                                                                      |
 | ------------------ | ------------------------ | ------------------------------------------------------------------------------------- |
@@ -32,7 +32,7 @@ A Soroban **smart-contract** multi-sig where the initiator picks the privacy lev
 | Amount / Recipient | ✅ Public                | Visible to co-signers (they approve it), public on-chain                              |
 | Feel               | A public bank statement  | An anonymously-signed payment                                                         |
 
-**Voter privacy** (above) hides _who approved_. For a transfer where the **amount + recipient** are hidden from everyone — and the deposit↔recipient link is severed — there's a separate **shielded pool** (our own `confidentialTransfer` circuit).
+**Voter privacy** (above) hides _who approved_. To hide **how much**, a vault can also hold a **confidential balance** on OpenZeppelin's confidential token — real XLM, wrapped, with amounts kept off-chain entirely.
 
 Same vault, same threshold — **you decide what the chain is allowed to see.**
 
@@ -43,7 +43,7 @@ Same vault, same threshold — **you decide what the chain is allowed to see.**
 Stellar's native multi-sig (and the wallets built on it — LOBSTR Vault, Solar, StellarGuard) is a **fixed protocol primitive**: it counts signatures against a threshold, and that's all. It **cannot run custom logic**. Stellar Vault is a **Soroban smart contract**, which is exactly what makes the rest possible:
 
 - **Zero-knowledge approvals** — verifying + recording a Groth16 nullifier on approval is logic a native account simply cannot execute.
-- **Confidential execution** — moving funds through a shielded pool needs a programmable contract.
+- **Confidential balances** — holding and spending a commitment-based balance needs a contract that can be the account, not just an address.
 - **A factory, one contract per vault** — each vault is its own deployed contract (own address, own native balance), Gnosis-Safe-style.
 - **Guards** — a per-tx limit, a rolling spending cap, a time-lock and a recipient allowlist, all enforced *by the vault itself*. A native account has one lever: the threshold.
 - **Batch (multi-call)** — up to 20 payments approved once and settled atomically. Native multi-sig has no notion of "these move together or not at all."
@@ -63,12 +63,12 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **ZK voter privacy**                            | ✅ **Real ZK**           | own `voteApproval.circom` (Poseidon + Merkle membership + nullifier), proofs generated **in-browser** and verified **on-chain**; signer keys come from a wallet signature, leaves are published shuffled, and `approve_zk_anon` needs no wallet to identify itself — see the limits below |
 | **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
-| **Confidential transfers (shielded pool)**      | ✅ **Real ZK, deployed** | our own `confidentialTransfer.circom` + `shield-pool` contract: deposit → **unlinkable** confidential send; on-chain only commitments + nullifiers, the sender↔recipient link is severed                              |
+| **Confidential balances**                       | ✅ **Live on testnet**   | a vault holds a second balance on OpenZeppelin's confidential token (Pedersen commitments, UltraHonk proofs) wrapping real XLM — **amounts never appear on-chain**. Every operation is an ordinary proposal, so the threshold and time-lock govern it. Sender and recipient stay public; the auditor channel is bound to a key nobody holds (see below) |
 | **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
 | **Arbitrary contract calls**                    | ✅ **Live on testnet**   | a proposal can call any allowlisted contract — swap on a DEX, supply to a lending market, move an asset the vault wasn't created with. Multi-asset falls out of it; the vault can never call itself |
 | **On-chain Groth16 verify**                     | ✅ **Live on testnet**   | a verifier contract keyed to **our** circuit's vk checks every ZK approval, and the vault pins all four public inputs to itself, its published signer set and the specific proposal — so anonymity is now a guarantee, not a convention |
 
-> **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **real ZK voter privacy**, and a **real shielded pool for confidential transfers** — all on testnet.
+> **TL;DR** — a deployed, wallet-signed multi-sig dApp with a **fully working transparent flow**, **ZK voter privacy verified on-chain**, **Safe-style guards**, **arbitrary contract calls**, and **confidential balances** — all on testnet.
 
 ---
 
@@ -77,19 +77,26 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 ```
 ┌──────────────────────────── STELLAR VAULT dApp ────────────────────────────┐
 │                                                                            │
-│   Next.js 14 + Freighter            Stellar Testnet (Soroban)              │
-│   ┌────────────────┐    reads/      ┌───────────────────────────────────┐  │
-│   │  web/          │───writes──────▶│  Vault Contract (stellar-vault/)  │  │
-│   │  Vault Gold UI │   (signed)     │  • dual-mode propose               │  │
-│   │  snarkjs prover│                │  • approve  / approve_zk           │  │
-│   └───────┬────────┘                │  • execute  / execute_confidential │  │
-│           │ generates                └─────────────┬─────────────────────┘  │
-│           ▼                                         │ (roadmap)              │
-│   voteApproval.circom                               ▼                        │
-│   real Groth16 proof              ┌───────────────────────────────────┐    │
-│   (anonymous signer approval)     │  Nethermind Pool + Groth16 Verifier│    │
-│                                   │  (confidential execution layer)    │    │
-│                                   └───────────────────────────────────┘    │
+│   Next.js 14 + Freighter          Stellar Testnet (Soroban, protocol 27)   │
+│   ┌──────────────────┐            ┌──────────────────────────────────────┐ │
+│   │  web/            │  create    │  vault-factory                       │ │
+│   │  Vault Gold UI   │───────────▶│  one contract per vault + registry   │ │
+│   │                  │            └──────────────┬───────────────────────┘ │
+│   │  snarkjs prover  │                           │ deploys                 │
+│   │  (voteApproval)  │            ┌──────────────▼───────────────────────┐ │
+│   │                  │  reads /   │  vault-instance                      │ │
+│   │  bb.js prover    │──writes───▶│  • propose / propose_batch           │ │
+│   │  (confidential)  │  (signed)  │  • propose_call → any allowlisted    │ │
+│   └──────────────────┘            │  • approve / approve_zk_anon         │ │
+│                                   │  • execute, under the guards:        │ │
+│                                   │    limit · cap · time-lock · allow   │ │
+│                                   └────┬──────────────────────┬──────────┘ │
+│                                        │ verifies             │ calls      │
+│                          ┌─────────────▼────────┐  ┌──────────▼──────────┐ │
+│                          │  groth16-verifier    │  │  confidential token │ │
+│                          │  BN254, our vk       │  │  (OpenZeppelin)     │ │
+│                          │  who approved: hidden│  │  amounts: hidden    │ │
+│                          └──────────────────────┘  └─────────────────────┘ │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -112,14 +119,14 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 
 | Contract                                               | ID                                                         |
 | ------------------------------------------------------ | ---------------------------------------------------------- |
-| **Vault Factory** (deploys one contract per vault)     | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
+| **Vault Factory** (deploys one contract per vault)     | `CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW` |
 | **Groth16 verifier** (keyed to our voteApproval circuit) | `CDAG3Y7JS52WCIOWO37FDXVTS5WQBSCRNPO42NRSKV53LYQQTPWH3GLB` |
-| **Shield Pool** (our confidential layer)               | `CDFENGB4EOJYROMSSQMI6PB6I7GHKU2QPHO7RPU7GVBHGMIZQU7DBAGA` |
+| **Confidential token** (OpenZeppelin, wraps XLM)      | `CDTZAT6D3XYS43A5Z6KVXZIFCBIVLBNO4R75OF2WWLCMCWZDQNBI3W2K` |
 | Token (XLM SAC)                                        | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
 | Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…`                                  |
 
 Each vault is its own contract, deployed by the factory — view a vault by its address on stellar.expert.
-🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
+🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW)
 
 ---
 
@@ -128,11 +135,10 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 56 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 45 pass (vault + guards + zk + calls)
+# 58 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 48 pass (vault + guards + zk + calls)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
-cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
-cargo test --manifest-path shield-pool/Cargo.toml      # 3 pass  (shielded pool)
+cargo test --manifest-path vault-factory/Cargo.toml    # 4 pass  (init guard, registry, forget/remember)
 
 # build a contract to wasm
 cargo build --manifest-path vault-instance/Cargo.toml --target wasm32v1-none --release
@@ -184,6 +190,32 @@ So the vault pins every public input to something it already knows:
 | `signerRoot` | the root the owner published |
 | `nullifier`  | the nullifier being recorded |
 
+### The auditor channel, and why ours cannot be opened
+
+The confidential token emits a ciphertext to a registered auditor key on every
+transfer, and the design has no switch for it — amounts are confidential *and*
+auditable, which is the point for regulated users.
+
+What it does not require is that anyone hold the matching secret. An auditor key
+derived by hashing a fixed string onto Grumpkin — rather than as `k·G` — is a
+valid curve point for which no discrete log is known to anyone. Bound to that,
+the channel stays structurally present and is openable by no one.
+
+This deployment does exactly that: the key comes from
+`"stellar-vault/no-auditor/v1"`, and the derivation is published in
+[`spike/confidential-token/nothing-up-my-sleeve.ts`](spike/confidential-token/nothing-up-my-sleeve.ts)
+so the claim is checkable rather than trusted. Verified on testnet — registry
+accepts the key, accounts register against it, transfers settle normally.
+Grumpkin's cofactor is 1, so there is no small-subgroup concern.
+
+`NEXT_PUBLIC_CONFIDENTIAL_AUDITOR_INDEX` switches between this and a real
+auditor keypair, because "confidential and auditable" is the better answer for
+some users and the choice should be explicit rather than baked in.
+
+Open question, asked upstream and not yet answered: whether they consider a
+keyless auditor a sound configuration, or whether something downstream assumes a
+real keypair exists.
+
 ### What the anonymity is, precisely
 
 Three separate things had to be true, and each was a distinct fix:
@@ -218,7 +250,7 @@ Because each vault is a programmable smart contract (not native multi-sig), it's
 - **More Safe-style modules** — role-based access (proposer / approver / executor), session keys, social recovery, transaction simulation before signing. Spending limits, rolling caps, time-locks, a recipient allowlist, batched multi-call and **arbitrary contract calls** are **already live** (see the status table).
 - **Off-chain approval collection** — today each approval is its own transaction; Safe collects signatures off-chain and submits one. A real cost and UX difference.
 - **Relayer / meta-tx** — full approver anonymity (today the tx source still reveals the submitter; the on-chain event already hides it).
-- **Confidential execution inside the vault** — wire the shielded pool directly into a private `execute` so amount + recipient are hidden by default.
+- **Recipient privacy** — confidential balances hide amounts but leave sender and recipient public. Severing that link is a separate problem; our earlier `shield-pool` did it at demo scale and was retired in favour of a maintained standard, so this is an open gap rather than a solved one.
 - DeFi integrations, mobile, production audit.
 
 ---
@@ -229,7 +261,7 @@ I tested the dApp continuously as a user and iterated based on what broke or fel
 
 - **Biggest one:** while testing, I noticed every vault shared a single balance. That pushed me to re-architect the whole thing into a **Safe-style factory** — one separate contract per vault, with isolated balances and an on-chain registry. A major rewrite driven directly by testing.
 - A co-signer on a second account **couldn't see the shared vault**, so I changed the factory to register each vault under **every signer**, not just the owner.
-- Private transactions weren't moving funds and the "private hides everything" framing was misleading — so I made private execution **actually move funds** and reframed it honestly: private = **anonymous approvals**, with a separate shielded pool for hiding amount/recipient.
+- Private transactions weren't moving funds and the "private hides everything" framing was misleading — so I made private execution **actually move funds** and reframed it honestly: private = **anonymous approvals**, with a separate layer for hiding amounts (at the time our own shielded pool; now OpenZeppelin's confidential token).
 - Execute occasionally failed on the first try due to RPC lag → added **retries + longer polling**.
 - The "Approve" button stayed after approving and errored on re-click → added a clear **"you approved · waiting"** state.
 - On mobile it wasn't responsive → added a **responsive layout**.
@@ -240,14 +272,14 @@ I tested the dApp continuously as a user and iterated based on what broke or fel
 ## Repository layout
 
 ```
-vault-factory/   Soroban factory — deploys one vault contract per vault (+ owner→vaults registry)
-vault-instance/  Soroban single-vault contract (own address + native balance, approve / approve_zk / execute)
-shield-pool/     Soroban shielded pool for confidential transfers
-circuits/        voteApproval.circom (voter privacy) + confidentialTransfer.circom + Groth16 setup + tests
-web/             Next.js 14 dApp (Vault Gold UI, Freighter, snarkjs prover)
-deployments/     testnet addresses
-docs/            architecture, ZK, A-plan roadmap, hackathon plan, submission kit
-stellar-vault/   earlier single-contract design (the "B" approach) — kept for the migration story
+vault-factory/     Soroban factory — deploys one vault contract per vault (+ owner→vaults registry)
+vault-instance/    the vault itself — own address and balance, guards, proposals, contract calls
+groth16-verifier/  on-chain Groth16 verifier keyed to voteApproval.circom (BN254)
+circuits/          voteApproval.circom (voter privacy) + Groth16 setup + end-to-end tests
+web/               Next.js 14 dApp (Vault Gold UI, Freighter, snarkjs + confidential-token client)
+spike/             bounded experiments kept as evidence (BN254 availability, confidential tokens)
+deployments/       testnet addresses and what each deployment changed
+docs/              architecture, ZK, roadmap, hackathon record
 ```
 
 ---

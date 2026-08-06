@@ -22,6 +22,7 @@
 //! policy, batches) lives under its own keys.
 
 use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
     symbol_short, token::TokenClient, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, U256, Val, Vec,
 };
@@ -121,6 +122,8 @@ pub enum DataKey {
     /// The contract call a proposal performs, when it is a call rather than a
     /// transfer.
     Call(u64),
+    /// Sub-invocations the vault pre-authorises for a call proposal.
+    CallAuth(u64),
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -417,17 +420,34 @@ impl VaultInstance {
     /// Unlike transfers, calls are allowlist-only: the target must have been
     /// approved by the owner via [`allow_contract`]. A vault with an empty call
     /// allowlist cannot make calls at all, which is the safe default.
+    /// `auth` lists calls the *callee* will make back out as this vault, which
+    /// the vault must pre-authorise.
+    ///
+    /// A contract's own authority covers only what it invokes directly. Calling
+    /// a token's `deposit`, which in turn calls the underlying asset's
+    /// `transfer(from = vault, ...)`, puts that transfer one level too deep —
+    /// the host rejects it with `Error(Auth, InvalidAction)` no matter how the
+    /// proposal was approved. Naming those sub-calls here is the only way to
+    /// express "yes, the thing I am calling may move my funds to do it".
+    ///
+    /// Each named contract must itself be on the call allowlist: authorising a
+    /// sub-call is a strictly larger permission than making one, so it cannot
+    /// be the looser of the two.
     pub fn propose_call(
         env: Env,
         proposer: Address,
         contract: Address,
         function: Symbol,
         args: Vec<Val>,
+        auth: Vec<CallSpec>,
         private_mode: bool,
     ) -> Result<u64, Error> {
         proposer.require_auth();
         Self::require_signer(&env, &proposer)?;
         Self::check_call_target(&env, &contract)?;
+        for a in auth.iter() {
+            Self::check_call_target(&env, &a.contract)?;
+        }
 
         // amount 0: a call carries no transfer of its own. Whatever it moves,
         // it moves through the callee under this vault's authority.
@@ -435,6 +455,9 @@ impl VaultInstance {
         env.storage()
             .persistent()
             .set(&DataKey::Call(tx_id), &CallSpec { contract, function, args });
+        if auth.len() > 0 {
+            env.storage().persistent().set(&DataKey::CallAuth(tx_id), &auth);
+        }
         Ok(tx_id)
     }
 
@@ -553,6 +576,30 @@ impl VaultInstance {
         // re-checked here in case the owner revoked the target meanwhile.
         if let Some(spec) = env.storage().persistent().get::<_, CallSpec>(&DataKey::Call(tx_id)) {
             Self::check_call_target(&env, &spec.contract)?;
+
+            // Re-checked here as well: the owner may have revoked a sub-call
+            // target while this sat waiting for approvals.
+            let auth: Vec<CallSpec> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CallAuth(tx_id))
+                .unwrap_or_else(|| Vec::new(&env));
+            if auth.len() > 0 {
+                let mut entries = Vec::new(&env);
+                for a in auth.iter() {
+                    Self::check_call_target(&env, &a.contract)?;
+                    entries.push_back(InvokerContractAuthEntry::Contract(SubContractInvocation {
+                        context: ContractContext {
+                            contract: a.contract,
+                            fn_name: a.function,
+                            args: a.args,
+                        },
+                        sub_invocations: Vec::new(&env),
+                    }));
+                }
+                env.authorize_as_current_contract(entries);
+            }
+
             env.invoke_contract::<Val>(&spec.contract, &spec.function, spec.args.clone());
 
             p.executed = true;

@@ -46,3 +46,45 @@ fn test_double_init_panics() {
     let wasm2 = BytesN::from_array(&env, &[1u8; 32]);
     factory.init(&admin2, &wasm2, &token2);
 }
+
+#[test]
+fn test_forget_and_remember_a_vault() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let id = env.register(VaultFactory, ());
+    let c = VaultFactoryClient::new(&env, &id);
+    c.init(&admin, &BytesN::from_array(&env, &[0u8; 32]), &Address::generate(&env));
+
+    let owner = Address::generate(&env);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    c.remember_vault(&owner, &a);
+    c.remember_vault(&owner, &b);
+    c.remember_vault(&owner, &b); // idempotent
+    assert_eq!(c.get_vaults(&owner).len(), 2);
+
+    // forgetting removes it from the listing only — nothing about the vault
+    // itself changes, which is the whole point of not calling it "delete"
+    c.forget_vault(&owner, &a);
+    let left = c.get_vaults(&owner);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left.get(0).unwrap(), b);
+
+    c.remember_vault(&owner, &a);
+    assert_eq!(c.get_vaults(&owner).len(), 2, "forgetting is reversible");
+}
+
+#[test]
+fn test_forgetting_an_unknown_vault_is_harmless() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let id = env.register(VaultFactory, ());
+    let c = VaultFactoryClient::new(&env, &id);
+    c.init(&admin, &BytesN::from_array(&env, &[0u8; 32]), &Address::generate(&env));
+
+    let owner = Address::generate(&env);
+    c.forget_vault(&owner, &Address::generate(&env));
+    assert_eq!(c.get_vaults(&owner).len(), 0);
+}

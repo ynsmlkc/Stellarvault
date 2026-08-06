@@ -153,6 +153,7 @@ const VAULT_ERRORS: Record<number, string> = {
   28: "A vault can never call itself — that would let one proposal lift every guard.",
   29: "The call allowlist is full (50 max).",
   30: "Turn on on-chain verification before approving anonymously.",
+  31: "That contract may not act on the vault's behalf — allowlist it first.",
 };
 
 /**
@@ -336,6 +337,19 @@ export async function getSignerCommitments(vaultAddr: string): Promise<bigint[]>
 
 export const setSignerCommitments = (vaultAddr: string, owner: string, commitments: bigint[]) =>
   invoke(vaultAddr, "set_signer_commitments", [xdr.ScVal.scvVec(commitments.map(u256))], owner);
+
+/**
+ * Point this vault at newer code. Owner-gated, and the only way an existing
+ * vault ever gets a fix: `factory.set_wasm` decides what NEW vaults are born
+ * with and leaves everything already deployed exactly where it was.
+ */
+export const upgradeVault = (vaultAddr: string, owner: string, wasmHash: string) =>
+  invoke(
+    vaultAddr,
+    "upgrade",
+    [nativeToScVal(Buffer.from(wasmHash, "hex"), { type: "bytes" })],
+    owner
+  );
 
 export const setZkConfig = (
   vaultAddr: string,
@@ -580,6 +594,47 @@ export const proposeCall = (
       addr(contract),
       xdr.ScVal.scvSymbol(fn),
       xdr.ScVal.scvVec(args.map(argToScVal)),
+      xdr.ScVal.scvVec([]),
+      bool(privateMode),
+    ],
+    proposer
+  );
+
+/**
+ * Propose a call whose arguments are already ScVals.
+ *
+ * `proposeCall` takes typed CallArgs because a human is filling in a form.
+ * Callers that build their own payloads — a ZK proof envelope, say — have
+ * nothing to type and would only lose fidelity round-tripping through strings.
+ */
+export type SubCall = { contract: string; function: string; args: xdr.ScVal[] };
+
+const callSpecScVal = (c: SubCall) =>
+  xdr.ScVal.scvMap([
+    entry("args", xdr.ScVal.scvVec(c.args)),
+    entry("contract", addr(c.contract)),
+    entry("function", xdr.ScVal.scvSymbol(c.function)),
+  ]);
+
+export const proposeCallRaw = (
+  vaultAddr: string,
+  proposer: string,
+  contract: string,
+  fn: string,
+  args: xdr.ScVal[],
+  /** Calls the callee makes back out as the vault, which it must pre-authorise. */
+  auth: SubCall[] = [],
+  privateMode = false
+) =>
+  invoke(
+    vaultAddr,
+    "propose_call",
+    [
+      addr(proposer),
+      addr(contract),
+      xdr.ScVal.scvSymbol(fn),
+      xdr.ScVal.scvVec(args),
+      xdr.ScVal.scvVec(auth.map(callSpecScVal)),
       bool(privateMode),
     ],
     proposer
@@ -602,39 +657,3 @@ export const proposeBatch = (
 /** Deposit = a plain token transfer to the vault's own address (Safe-style). */
 export const depositToVault = (vaultAddr: string, from: string, amountStroops: bigint) =>
   invoke(CONFIG.tokenId, "transfer", [addr(from), addr(vaultAddr), i128(amountStroops)], from);
-
-/* ---------------- shield pool (confidential transfer) ---------------- */
-
-/** Deposit `amount` into the shield pool, registering a note `commitment`. */
-export const poolDeposit = (from: string, amountStroops: bigint, commitment: bigint) =>
-  invoke(CONFIG.shieldPoolId, "deposit", [addr(from), i128(amountStroops), u256(commitment)], from);
-
-/** Confidential withdraw: spend a note (Groth16 proof) to `recipient`. */
-export const poolWithdraw = (
-  signer: string,
-  proof: any,
-  root: bigint,
-  nullifierHash: bigint,
-  recipient: string,
-  amountStroops: bigint
-) =>
-  invoke(
-    CONFIG.shieldPoolId,
-    "withdraw",
-    [nativeToScVal(proofTo256(proof)), u256(root), u256(nullifierHash), addr(recipient), i128(amountStroops)],
-    signer
-  );
-
-/** All deposited commitments — the frontend rebuilds the Merkle tree from these. */
-export async function getCommitments(): Promise<bigint[]> {
-  const list = await simulate(CONFIG.shieldPoolId, "get_commitments", []);
-  return (list ?? []).map((x: any) => BigInt(x));
-}
-
-export async function isSpent(nullifierHash: bigint): Promise<boolean> {
-  return simulate(CONFIG.shieldPoolId, "is_spent", [u256(nullifierHash)]);
-}
-
-export async function getShieldBalance(): Promise<bigint> {
-  return BigInt(await simulate(CONFIG.tokenId, "balance", [addr(CONFIG.shieldPoolId)]));
-}
