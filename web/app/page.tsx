@@ -67,6 +67,30 @@ const GRAD_B = "linear-gradient(135deg,#bda07f,#6f5b3d)";
 const GRAD_C = "linear-gradient(135deg,#a99272,#5e4e34)";
 const GRADS = [GRAD_A, GRAD_B, GRAD_C];
 
+/**
+ * Vaults the user has chosen not to see.
+ *
+ * A vault cannot be deleted — it is a deployed contract holding real balances,
+ * and the factory has no `upgrade`, so its registry can never learn to forget
+ * one either. Hiding is therefore local and reversible: the vault keeps its
+ * address, its funds and its listing on-chain; this only stops it filling the
+ * dashboard. Nothing here can lose anything.
+ */
+const hiddenKey = (w: string) => `sv_hidden_${CONFIG.factoryId}_${w}`;
+const loadHidden = (w: string | null): string[] => {
+  if (!w || typeof localStorage === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(hiddenKey(w)) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const saveHidden = (w: string, list: string[]) => {
+  try {
+    localStorage.setItem(hiddenKey(w), JSON.stringify(list));
+  } catch {}
+};
+
 // remember which (vault, tx) this wallet already approved → avoid re-click errors
 const apprKey = (v: string, t: number, w: string) => `sv_appr_${v}_${t}_${w}`;
 const didApprove = (v: string, t: number, w: string | null) =>
@@ -1010,6 +1034,17 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
   const pending = proposals.filter((x) => !x.executed).length;
   const [myVaults, setMyVaults] = useState<{ address: string; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
   const [loadingVaults, setLoadingVaults] = useState(true);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
+
+  useEffect(() => setHidden(loadHidden(wallet)), [wallet]);
+
+  const toggleHidden = (addr: string) => {
+    if (!wallet) return;
+    const next = hidden.includes(addr) ? hidden.filter((a) => a !== addr) : [...hidden, addr];
+    setHidden(next);
+    saveHidden(wallet, next);
+  };
 
   useEffect(() => {
     if (!wallet) {
@@ -1062,8 +1097,8 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
       )}
       <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
         {loadingVaults && wallet && [0, 1, 2].map((i) => <VaultCardSkeleton key={i} />)}
-        {!loadingVaults && myVaults.map((v) => (
-          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live />
+        {!loadingVaults && myVaults.filter((v) => showHidden || !hidden.includes(v.address)).map((v) => (
+          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live hidden={hidden.includes(v.address)} onToggleHidden={() => toggleHidden(v.address)} />
         ))}
         {!loadingVaults && !myVaults.length && wallet && (
           <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
@@ -1072,6 +1107,14 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
         )}
       </div>
 
+      {hidden.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "#5a564d", marginTop: -14, marginBottom: 24 }}>
+          {hidden.length} vault{hidden.length === 1 ? "" : "s"} hidden — still on-chain, still holding whatever they hold.{" "}
+          <span onClick={() => setShowHidden(!showHidden)} style={{ color: "#C9A86A", cursor: "pointer" }}>
+            {showHidden ? "hide them again" : "show them"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1097,10 +1140,17 @@ function VaultCardSkeleton() {
   );
 }
 
-function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void }) {
+function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick, hidden, onToggleHidden }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void; hidden?: boolean; onToggleHidden?: () => void }) {
   return (
     <div onClick={onClick} className={gold ? "h-cardgold" : "h-card"} style={{ position: "relative", border: gold ? "1px solid rgba(201,168,106,0.24)" : "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: gold ? "linear-gradient(180deg,#15140f,#111110)" : "#121211", padding: 24, cursor: "pointer", overflow: "hidden" }}>
       {gold && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />}
+      {onToggleHidden && (
+        <span
+          onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
+          title={hidden ? "Show on the dashboard again" : "Hide from the dashboard — the vault and its funds are untouched"}
+          style={{ position: "absolute", top: 10, right: 12, fontFamily: MONO, fontSize: 10.5, color: "#46433c", cursor: "pointer", letterSpacing: ".08em" }}
+        >{hidden ? "unhide" : "hide"}</span>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>{name}{live && <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "1px 5px" }}>LIVE</span>}</div>
