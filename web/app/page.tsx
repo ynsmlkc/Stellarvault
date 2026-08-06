@@ -906,6 +906,10 @@ type ShellProps = {
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
 function AppShell(p: ShellProps) {
+  /** Screens that act on one specific vault rather than the account as a whole. */
+  const inVault =
+    p.screen === "vault" || p.screen === "propose" || p.screen === "guards" || p.screen === "confidential";
+
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
     <button onClick={onClick} className="h-nav" style={{ background: "transparent", border: "none", color: active ? "#ECE7DD" : "#8A857B", fontFamily: SANS, fontSize: 13, padding: "7px 12px", borderRadius: 7, cursor: "pointer" }}>{label}</button>
   );
@@ -920,10 +924,11 @@ function AppShell(p: ShellProps) {
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
             {/* Guards and the confidential balance belong to ONE vault — its
-                limits, its signer set, its balance. Offering them with no vault
-                open would query an empty address and fail for no visible
-                reason, so they appear once a vault is, labelled with which. */}
-            {p.vaultAddress && (
+                limits, its signer set, its balance. They show only while you
+                are inside that vault: gating on "a vault is selected" is not
+                enough, because the selection survives navigating back to the
+                list, which is exactly where they do not belong. */}
+            {inVault && p.vaultAddress && (
               <>
                 <span style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
                 <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
