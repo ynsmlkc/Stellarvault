@@ -5,17 +5,28 @@
  *
  * Every action here is an ordinary vault proposal that happens to call the token
  * contract, so the threshold, time-lock and cancellation govern it exactly as
- * they govern a transfer. Nothing about the vault contract knows this screen
+ * they govern a transfer. Nothing in the vault contract knows this screen
  * exists — see `spike/confidential-token/`.
+ *
+ * # What this screen hides from the user, on purpose
+ *
+ * The token keeps two balances: incoming payments land in `receiving`, and only
+ * `spendable` can be sent. That split is not cosmetic — if incoming funds
+ * changed the balance you were proving against, anyone could stop you spending
+ * by sending dust while you prove. But it is *the token's* problem, not the
+ * treasurer's, so this screen shows one number and calls the fold "settle"
+ * rather than making anyone learn the word merge.
  */
 
-import { useState } from "react";
-import { CONFIG, shortAddr, contractExplorerUrl } from "@/lib/stellar";
+import { useCallback, useEffect, useState } from "react";
+import { CONFIG, shortAddr, formatXLM, contractExplorerUrl } from "@/lib/stellar";
 import { proposeCallRaw, allowContract, getAllowedContracts, describeError } from "@/lib/contract";
 import {
   vaultConfidentialKey,
   readConfidentialBalance,
+  isRegistered as checkRegistered,
   buildRegisterArgs,
+  buildDepositArgs,
   buildMergeArgs,
   buildTransferArgs,
   type ConfidentialBalance,
@@ -28,11 +39,13 @@ const MONO = "'JetBrains Mono',monospace";
 type Props = {
   wallet: string | null;
   vaultAddress: string;
-  /** Ledger to replay confidential events from — the token's deploy ledger. */
+  /** The vault's public XLM — what can still be moved into the hidden side. */
+  publicBalance: bigint | null;
   fromLedger: number;
   onBack: () => void;
-  onProposed: (fn: string) => void;
+  onProposed: (what: string) => void;
   onError: (msg: string) => void;
+  onGoToVault: () => void;
 };
 
 const card: React.CSSProperties = {
@@ -52,13 +65,41 @@ const input: React.CSSProperties = {
   fontFamily: MONO,
   fontSize: 13,
 };
+const gold: React.CSSProperties = {
+  width: "100%",
+  background: "#C9A86A",
+  color: "#0A0A0B",
+  border: "none",
+  fontFamily: SANS,
+  fontWeight: 600,
+  fontSize: 14,
+  padding: 13,
+  borderRadius: 10,
+  cursor: "pointer",
+};
 
-export default function Confidential({ wallet, vaultAddress, fromLedger, onBack, onProposed, onError }: Props) {
+const toStroops = (s: string): bigint => {
+  const n = Number(String(s).replace(/,/g, "").trim());
+  if (!isFinite(n) || n <= 0) throw new Error("Enter a valid amount.");
+  return BigInt(Math.round(n * 1e7));
+};
+
+export default function Confidential({
+  wallet, vaultAddress, publicBalance, fromLedger, onBack, onProposed, onError, onGoToVault,
+}: Props) {
   const [keys, setKeys] = useState<any>(null);
   const [balance, setBalance] = useState<ConfidentialBalance | null>(null);
+  const [registered, setRegistered] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [lastProposal, setLastProposal] = useState<string | null>(null);
+
+  const [depositAmount, setDepositAmount] = useState("");
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
+
+  useEffect(() => {
+    checkRegistered(vaultAddress).then(setRegistered).catch(() => setRegistered(false));
+  }, [vaultAddress]);
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -72,7 +113,6 @@ export default function Confidential({ wallet, vaultAddress, fromLedger, onBack,
     }
   };
 
-  /** Derive the vault's viewing key and replay its balance from events. */
   const unlock = () =>
     run("unlock", async () => {
       const k = await vaultConfidentialKey(vaultAddress);
@@ -80,8 +120,17 @@ export default function Confidential({ wallet, vaultAddress, fromLedger, onBack,
       setBalance(await readConfidentialBalance(vaultAddress, k, fromLedger));
     });
 
-  /** Every op goes out as a proposal; nothing settles until the threshold does. */
-  const propose = (label: string, fn: string, build: () => Promise<any[]>) =>
+  const refresh = useCallback(async () => {
+    setRegistered(await checkRegistered(vaultAddress));
+    if (keys) setBalance(await readConfidentialBalance(vaultAddress, keys, fromLedger));
+  }, [keys, vaultAddress, fromLedger]);
+
+  /**
+   * Nothing here executes. Each button files a proposal the vault's signers
+   * still have to approve — the same rule as any other spend, which is the
+   * point, but easy to miss when a button says "Send".
+   */
+  const propose = (label: string, human: string, fn: string, build: () => Promise<any[]>) =>
     run(label, async () => {
       if (!wallet) throw new Error("Connect a wallet first.");
       const allowed = await getAllowedContracts(vaultAddress);
@@ -89,91 +138,126 @@ export default function Confidential({ wallet, vaultAddress, fromLedger, onBack,
         await allowContract(vaultAddress, wallet, CONFIG.confidentialTokenId);
       }
       await proposeCallRaw(vaultAddress, wallet, CONFIG.confidentialTokenId, fn, await build());
-      onProposed(fn);
+      setLastProposal(human);
+      onProposed(human);
     });
 
-  const fmt = (v: bigint) => (Number(v) / 1e7).toLocaleString(undefined, { maximumFractionDigits: 7 });
+  const spendable = balance?.spendable ?? 0n;
+  const settling = balance?.receiving ?? 0n;
+  const total = spendable + settling;
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       <button onClick={onBack} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
       <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Hidden amounts</h1>
       <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 22, lineHeight: 1.6 }}>
-        {"A second balance for this vault, held as a commitment, so amounts never appear on-chain. It wraps real XLM: what goes in comes back out. This hides "}<span style={{ color: "#ECE7DD" }}>how much</span> — to hide <span style={{ color: "#ECE7DD" }}>who approved</span>, use anonymous approvals when proposing. Each action below is an ordinary proposal, so the threshold and time-lock apply.
+        A second balance for this vault where amounts never appear on-chain. It holds real XLM — moved in from the vault&apos;s public balance, and withdrawable back to it. This hides <span style={{ color: "#ECE7DD" }}>how much</span>; to hide <span style={{ color: "#ECE7DD" }}>who approved</span>, choose anonymous approvals when proposing.
       </p>
 
+      {lastProposal && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, border: "1px solid rgba(201,168,106,0.35)", borderRadius: 12, background: "linear-gradient(180deg,#16150f,#121210)", padding: "16px 18px", marginBottom: 18 }}>
+          <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.55 }}>
+            <b>{lastProposal}</b> is waiting for approval — nothing has moved yet. Approve and execute it in the vault, like any other proposal.
+          </div>
+          <button onClick={onGoToVault} className="h-goldbtn" style={{ ...gold, width: "auto", whiteSpace: "nowrap", padding: "10px 16px" }}>Go to vault →</button>
+        </div>
+      )}
+
+      {/* ---------------- balance ---------------- */}
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Balance</div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>Hidden balance</div>
           <span style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".12em", color: keys ? "#7FB069" : "#8A857B", border: `1px solid ${keys ? "rgba(127,176,105,0.4)" : "rgba(236,231,221,0.14)"}`, borderRadius: 6, padding: "3px 8px" }}>
             {keys ? "UNLOCKED" : "LOCKED"}
           </span>
         </div>
+
         {balance ? (
           <>
-            <div style={{ fontFamily: DISPLAY, fontSize: 34, color: "#ECE7DD", margin: "12px 0 4px" }}>
-              {fmt(balance.spendable)} <span style={{ fontSize: 14, fontFamily: MONO, color: "#8A857B" }}>XLM spendable</span>
+            <div style={{ fontFamily: DISPLAY, fontSize: 38, color: "#ECE7DD", margin: "10px 0 2px" }}>
+              {formatXLM(total)} <span style={{ fontSize: 15, fontFamily: MONO, color: "#8A857B" }}>XLM</span>
             </div>
-            <div style={{ fontSize: 13, color: "#8A857B" }}>
-              {fmt(balance.receiving)} XLM waiting in receiving — merge to make it spendable.
-            </div>
+            {settling > 0n ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12, borderTop: "1px solid rgba(236,231,221,0.06)", paddingTop: 12 }}>
+                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>
+                  {formatXLM(settling)} XLM just arrived and can&apos;t be sent until it settles. Incoming funds are held apart so nobody can disturb a payment you&apos;re signing.
+                </div>
+                <button
+                  onClick={() => propose("settle", "Settling incoming funds", "merge", () => buildMergeArgs(vaultAddress))}
+                  disabled={!!busy}
+                  style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 9, padding: "9px 14px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+                >{busy === "settle" ? "…" : "Settle"}</button>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: "#8A857B" }}>Ready to send.</div>
+            )}
+            <button onClick={() => run("refresh", refresh)} className="h-navtext" style={{ marginTop: 12, background: "transparent", border: "none", color: "#5a564d", fontFamily: SANS, fontSize: 12, cursor: "pointer", padding: 0 }}>↻ refresh</button>
           </>
         ) : (
           <>
             <p style={{ fontSize: 13, color: "#8A857B", margin: "10px 0 16px", lineHeight: 1.6 }}>
-              Reading the balance needs the vault&apos;s viewing key, derived from a wallet signature. It is a viewing and proving key, not a spending key — moving funds still needs the vault&apos;s threshold.
+              Reading this balance needs the vault&apos;s viewing key, derived from a wallet signature — a signature, not a transaction, so there is no fee. It can read and prove, but not spend: moving funds still needs the vault&apos;s threshold.
             </p>
-            <button onClick={unlock} disabled={!!busy || !wallet} className="h-goldbtn" style={{ width: "100%", background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, borderRadius: 10, cursor: "pointer", opacity: busy === "unlock" ? 0.6 : 1 }}>
+            <button onClick={unlock} disabled={!!busy || !wallet} style={{ ...gold, background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", opacity: busy === "unlock" ? 0.6 : 1 }}>
               {busy === "unlock" ? "Check Freighter…" : "Unlock with wallet signature"}
             </button>
           </>
         )}
       </div>
 
-      <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Set up</div>
+      {/* ---------------- step 1: register ---------------- */}
+      {registered === false && (
+        <div style={{ ...card, borderColor: "rgba(201,168,106,0.3)" }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>ONE-TIME SETUP</div>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Publish the vault&apos;s confidential key</div>
+          <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+            Until this is done the vault has no confidential account at all, so funds have nowhere to land: a sender encrypts the amount to your key, and there is no key on file. Done once per vault.
+          </p>
+          <button
+            onClick={() => keys && propose("register", "Confidential setup", "register", () => buildRegisterArgs(vaultAddress, keys))}
+            disabled={!!busy || !keys}
+            style={{ ...gold, opacity: keys && !busy ? 1 : 0.45, cursor: keys ? "pointer" : "not-allowed" }}
+          >
+            {busy === "register" ? "Proving in browser…" : keys ? "Propose setup" : "Unlock first"}
+          </button>
+        </div>
+      )}
+
+      {/* ---------------- step 2: fund it ---------------- */}
+      <div style={{ ...card, opacity: registered ? 1 : 0.45 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Move XLM in</div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
-          Registering binds the vault&apos;s confidential keys to the token contract. Needed once, before it can hold anything.
+          From the vault&apos;s public balance{publicBalance != null ? ` (${formatXLM(publicBalance)} XLM)` : ""} into the hidden one. The amount is public going in — it only becomes hidden once inside.
         </p>
         <div style={{ display: "flex", gap: 8 }}>
+          <input value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0.00 XLM" disabled={!registered} style={{ ...input, flex: 1 }} />
           <button
-            onClick={() => keys && propose("register", "register", () => buildRegisterArgs(vaultAddress, keys))}
-            disabled={!!busy || !keys}
-            style={{ flex: 1, background: "transparent", color: keys ? "#ECE7DD" : "#5a564d", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 10, padding: 12, fontFamily: SANS, fontSize: 13.5, fontWeight: 600, cursor: keys ? "pointer" : "not-allowed" }}
-          >{busy === "register" ? "Proving…" : "Propose register"}</button>
-          <button
-            onClick={() => propose("merge", "merge", () => buildMergeArgs(vaultAddress))}
-            disabled={!!busy}
-            style={{ flex: 1, background: "transparent", color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 10, padding: 12, fontFamily: SANS, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}
-          >{busy === "merge" ? "Proposing…" : "Propose merge"}</button>
+            onClick={() => propose("deposit", "Moving XLM into the hidden balance", "deposit", () => buildDepositArgs(vaultAddress, toStroops(depositAmount)))}
+            disabled={!!busy || !registered || !depositAmount.trim()}
+            style={{ ...gold, width: "auto", padding: "0 20px", opacity: registered && depositAmount.trim() && !busy ? 1 : 0.45 }}
+          >{busy === "deposit" ? "…" : "Move in"}</button>
         </div>
       </div>
 
-      <div style={card}>
+      {/* ---------------- step 3: send ---------------- */}
+      <div style={{ ...card, opacity: registered ? 1 : 0.45 }}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Send confidentially</div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
-          The recipient must already have a confidential account — the amount is encrypted to their key. Proving happens in this browser and takes a few seconds.
+          The recipient needs a confidential account of their own — the amount is encrypted to their key. The proof is generated in this browser and takes a few seconds.
         </p>
-        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" style={{ ...input, marginBottom: 10 }} />
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00 XLM" style={{ ...input, marginBottom: 14 }} />
+        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: 10 }} />
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00 XLM" disabled={!registered} style={{ ...input, marginBottom: 14 }} />
         <button
           onClick={() =>
             keys &&
-            propose("transfer", "confidential_transfer", () =>
-              buildTransferArgs(
-                vaultAddress,
-                recipient.trim(),
-                BigInt(Math.round(Number(amount.replace(/,/g, "")) * 1e7)),
-                keys,
-                fromLedger
-              )
+            propose("transfer", "Confidential payment", "confidential_transfer", () =>
+              buildTransferArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
             )
           }
-          disabled={!!busy || !keys || !recipient.trim() || !amount.trim()}
-          className="h-goldbtn"
-          style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, borderRadius: 10, cursor: "pointer", opacity: keys && recipient.trim() && amount.trim() && !busy ? 1 : 0.45 }}
+          disabled={!!busy || !registered || !keys || !recipient.trim() || !amount.trim()}
+          style={{ ...gold, opacity: registered && keys && recipient.trim() && amount.trim() && !busy ? 1 : 0.45 }}
         >
-          {busy === "transfer" ? "Proving in browser…" : "Propose confidential transfer"}
+          {busy === "transfer" ? "Proving in browser…" : "Propose confidential payment"}
         </button>
       </div>
 

@@ -962,8 +962,10 @@ function AppShell(p: ShellProps) {
           <Confidential
             wallet={p.wallet}
             vaultAddress={p.vaultAddress}
+            publicBalance={p.balance}
             fromLedger={CONFIG.confidentialFromLedger}
             onBack={() => p.go("vault")}
+            onGoToVault={() => p.go("vault")}
             onProposed={p.onConfidentialProposed}
             onError={p.onConfidentialError}
           />

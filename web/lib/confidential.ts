@@ -131,6 +131,28 @@ export async function buildRegisterArgs(vaultAddress: string, keys: any): Promis
   ];
 }
 
+/** Has this vault published its confidential keys yet? */
+export async function isRegistered(vaultAddress: string): Promise<boolean> {
+  const m = await sdk();
+  return client(m).isRegistered(vaultAddress);
+}
+
+/**
+ * Args for `deposit` — the vault's own public XLM into its confidential
+ * receiving balance. Both sides are the vault: it pays, and it receives.
+ *
+ * No proof: the amount is public on the way in, and only becomes hidden once it
+ * is inside a commitment.
+ */
+export async function buildDepositArgs(vaultAddress: string, amount: bigint): Promise<any[]> {
+  const { Address, nativeToScVal } = await import("@stellar/stellar-sdk");
+  return [
+    new Address(vaultAddress).toScVal(),
+    new Address(vaultAddress).toScVal(),
+    nativeToScVal(amount, { type: "i128" }),
+  ];
+}
+
 /** Args for `merge` — folding receiving into spendable. No proof needed. */
 export async function buildMergeArgs(vaultAddress: string): Promise<any[]> {
   const { Address } = await import("@stellar/stellar-sdk");
