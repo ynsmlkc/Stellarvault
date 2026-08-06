@@ -6,7 +6,7 @@
 > Approve as a team. Reveal nothing. Built on Soroban with real zero-knowledge proofs.
 
 [![CI](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml/badge.svg)](https://github.com/ynsmlkc/Stellarvault/actions/workflows/ci.yml)
-[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
+[![Network](https://img.shields.io/badge/network-Stellar%20Testnet-7FB069)](https://stellar.expert/explorer/testnet/contract/CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW)
 [![Contract](https://img.shields.io/badge/Soroban-Rust%20SDK%2027-C9A86A)](vault-instance/)
 [![ZK](https://img.shields.io/badge/ZK-Groth16%20%C2%B7%20circom-C9A86A)](circuits/)
 
@@ -119,14 +119,14 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 
 | Contract                                               | ID                                                         |
 | ------------------------------------------------------ | ---------------------------------------------------------- |
-| **Vault Factory** (deploys one contract per vault)     | `CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J` |
+| **Vault Factory** (deploys one contract per vault)     | `CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW` |
 | **Groth16 verifier** (keyed to our voteApproval circuit) | `CDAG3Y7JS52WCIOWO37FDXVTS5WQBSCRNPO42NRSKV53LYQQTPWH3GLB` |
 | **Confidential token** (OpenZeppelin, wraps XLM)      | `CDTZAT6D3XYS43A5Z6KVXZIFCBIVLBNO4R75OF2WWLCMCWZDQNBI3W2K` |
 | Token (XLM SAC)                                        | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
 | Nethermind Private-Payments Pool / Verifier (explored) | `CCQRXA6U…` / `CDRMXX3O…`                                  |
 
 Each vault is its own contract, deployed by the factory — view a vault by its address on stellar.expert.
-🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CBL2WDAFURF5UR2FRKIXLJA4CF2DJ5BXWCFD6S5EIHWCLHOXBS3U753J)
+🔭 [View the Factory on stellar.expert](https://stellar.expert/explorer/testnet/contract/CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW)
 
 ---
 
@@ -135,10 +135,10 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 53 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 45 pass (vault + guards + zk + calls)
+# 58 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 48 pass (vault + guards + zk + calls)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
-cargo test --manifest-path vault-factory/Cargo.toml    # 2 pass  (factory init guard + registry)
+cargo test --manifest-path vault-factory/Cargo.toml    # 4 pass  (init guard, registry, forget/remember)
 
 # build a contract to wasm
 cargo build --manifest-path vault-instance/Cargo.toml --target wasm32v1-none --release
