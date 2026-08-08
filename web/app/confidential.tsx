@@ -25,6 +25,7 @@ import {
   vaultConfidentialKey,
   readConfidentialBalance,
   isRegistered as checkRegistered,
+  recipientIsReady,
   buildRegisterArgs,
   buildDepositArgs,
   buildDepositAuth,
@@ -96,6 +97,24 @@ export default function Confidential({
 
   const [depositAmount, setDepositAmount] = useState("");
   const [recipient, setRecipient] = useState("");
+  /** null = not checked yet / not a plausible address */
+  const [recipientReady, setRecipientReady] = useState<boolean | null>(null);
+
+  // Check as they type, so a payment that cannot land is caught before a proof
+  // is generated for it.
+  useEffect(() => {
+    const a = recipient.trim();
+    if (!/^[GC][A-Z2-7]{55}$/.test(a)) {
+      setRecipientReady(null);
+      return;
+    }
+    let alive = true;
+    setRecipientReady(null);
+    recipientIsReady(a).then((ok) => alive && setRecipientReady(ok));
+    return () => {
+      alive = false;
+    };
+  }, [recipient]);
   const [amount, setAmount] = useState("");
 
   useEffect(() => {
@@ -267,14 +286,22 @@ export default function Confidential({
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
           The recipient needs a confidential account of their own — the amount is encrypted to their key. The proof is generated in this browser and takes a few seconds.
         </p>
-        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: 10 }} />
+        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: recipientReady === false ? 8 : 10, borderColor: recipientReady === false ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)" }} />
+        {recipientReady === false && (
+          <div style={{ fontSize: 12.5, color: "#C45D4A", marginBottom: 10, lineHeight: 1.55 }}>
+            This address has no confidential account, so there is no key to encrypt the amount to — it cannot be paid this way until its owner sets one up. Any address can still be paid from the vault&apos;s public balance.
+          </div>
+        )}
+        {recipientReady === true && (
+          <div style={{ fontSize: 12.5, color: "#7FB069", marginBottom: 10 }}>✓ Ready to receive confidentially.</div>
+        )}
         <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00 XLM" disabled={!registered} style={{ ...input, marginBottom: 14 }} />
         {(() => {
           let wanted: bigint | null = null;
           try { wanted = amount.trim() ? toStroops(amount) : null; } catch { wanted = null; }
           const short = wanted != null && wanted > spendable;
           const settleWouldCover = short && wanted != null && wanted <= spendable + settling;
-          const blocked = short;
+          const blocked = short || recipientReady === false;
 
           return (
             <>
@@ -297,9 +324,11 @@ export default function Confidential({
               >
                 {busy === "transfer"
                   ? "Proving in browser…"
-                  : blocked
-                    ? settleWouldCover ? "Settle first" : "Not enough ready"
-                    : "Propose confidential payment"}
+                  : recipientReady === false
+                    ? "Recipient can't receive yet"
+                    : blocked
+                      ? settleWouldCover ? "Settle first" : "Not enough ready"
+                      : "Propose confidential payment"}
               </button>
             </>
           );

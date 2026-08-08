@@ -139,6 +139,23 @@ export async function buildRegisterArgs(vaultAddress: string, keys: any): Promis
   ];
 }
 
+/**
+ * Does this address have a confidential account?
+ *
+ * A confidential transfer encrypts the amount to the recipient's key, so an
+ * address that never registered simply cannot be paid this way — there is
+ * nothing to encrypt to. Worth knowing before a proof is generated for a
+ * payment that cannot land.
+ */
+export async function recipientIsReady(address: string): Promise<boolean> {
+  try {
+    const m = await sdk();
+    return !!(await client(m).confidentialBalance(address));
+  } catch {
+    return false;
+  }
+}
+
 /** Has this vault published its confidential keys yet? */
 export async function isRegistered(vaultAddress: string): Promise<boolean> {
   const m = await sdk();
