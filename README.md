@@ -190,6 +190,24 @@ So the vault pins every public input to something it already knows:
 | `signerRoot` | the root the owner published |
 | `nullifier`  | the nullifier being recorded |
 
+### Paying someone who isn't in the system
+
+A confidential transfer encrypts the amount to the recipient's key, so an
+address that never registered cannot receive one — there is nothing to encrypt
+to. Taken alone that would make the feature close to useless for a treasury:
+you cannot ask every contractor, grantee and supplier to onboard before you can
+pay them.
+
+So an unregistered recipient gets paid by `withdraw` instead: ordinary XLM
+leaves the hidden balance and lands in their account, and they need to know
+nothing about any of this. That payment's amount is public, because it exits as
+a normal SEP-41 transfer. The vault's remaining balance stays hidden.
+
+The app picks between the two by checking the address as it is typed, and says
+which one it is about to do and what that reveals. The honest summary is that
+this hides your treasury's balance and its payments to other participants, and
+reveals individual payments to outsiders — not that everything is hidden.
+
 ### The auditor channel, and why ours cannot be opened
 
 The confidential token emits a ciphertext to a registered auditor key on every

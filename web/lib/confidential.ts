@@ -205,6 +205,47 @@ export async function buildMergeArgs(vaultAddress: string): Promise<any[]> {
 }
 
 /**
+ * Args for `withdraw` — pay a plain address out of the hidden balance.
+ *
+ * The way out for a recipient who has no confidential account, and never will:
+ * they receive ordinary XLM and need to know nothing about any of this. The
+ * cost is that this payment's amount is public, since it leaves as a normal
+ * SEP-41 transfer. What stays hidden is the vault's remaining balance — a
+ * confidential treasury that can still pay the outside world, rather than one
+ * that can only pay its own kind.
+ */
+export async function buildWithdrawArgs(
+  vaultAddress: string,
+  recipient: string,
+  amount: bigint,
+  keys: any,
+  fromLedger: number
+): Promise<any[]> {
+  const m = await sdk();
+  const { Address, nativeToScVal } = await import("@stellar/stellar-sdk");
+  const c = client(m);
+
+  const engine = new m.StateEngine({
+    client: c, store: new m.MemoryStore(), keys, address: vaultAddress, fromLedger,
+  });
+  const s = await engine.sync();
+  if (s.spendable.v < amount) {
+    const xlm = (v: bigint) => (Number(v) / 1e7).toLocaleString(undefined, { maximumFractionDigits: 7 });
+    throw new Error(`Only ${xlm(s.spendable.v)} XLM is ready to send, need ${xlm(amount)}.`);
+  }
+
+  const kAudS = await c.auditorKey(CONFIG.confidentialAuditorIndex);
+  const w = m.buildWithdrawWitness({ keys, v: s.spendable.v, r: s.spendable.r, amount, kAudS });
+  const { proof } = await new m.CircuitProver(await circuit("withdraw")).prove(w.inputs);
+  return [
+    new Address(vaultAddress).toScVal(),
+    new Address(recipient).toScVal(),
+    nativeToScVal(amount, { type: "i128" }),
+    m.encodeWithdrawData(w, proof),
+  ];
+}
+
+/**
  * Args for `confidential_transfer`. The recipient must already be registered,
  * otherwise there is no key to encrypt the amount to.
  */

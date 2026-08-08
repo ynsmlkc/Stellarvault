@@ -31,6 +31,7 @@ import {
   buildDepositAuth,
   buildMergeArgs,
   buildTransferArgs,
+  buildWithdrawArgs,
   type ConfidentialBalance,
 } from "@/lib/confidential";
 
@@ -284,12 +285,17 @@ export default function Confidential({
       <div style={{ ...card, opacity: registered ? 1 : 0.45 }}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Send confidentially</div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
-          The recipient needs a confidential account of their own — the amount is encrypted to their key. The proof is generated in this browser and takes a few seconds.
+          If the recipient has a confidential account, the amount is encrypted to their key and stays hidden. If they don&apos;t, you can still pay them out of this balance in ordinary XLM — that payment&apos;s amount becomes public, the rest of the balance doesn&apos;t. Either way the proof is generated in this browser and takes a few seconds.
         </p>
         <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: recipientReady === false ? 8 : 10, borderColor: recipientReady === false ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)" }} />
         {recipientReady === false && (
-          <div style={{ fontSize: 12.5, color: "#C45D4A", marginBottom: 10, lineHeight: 1.55 }}>
-            This address has no confidential account, so there is no key to encrypt the amount to — it cannot be paid this way until its owner sets one up. Any address can still be paid from the vault&apos;s public balance.
+          <div style={{ border: "1px solid rgba(201,168,106,0.3)", borderRadius: 10, background: "#0c0c0d", padding: 14, marginBottom: 12 }}>
+            <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 4 }}>
+              This address has no confidential account, so there is no key to encrypt the amount to.
+            </div>
+            <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.6 }}>
+              You can still pay them <b style={{ color: "#ECE7DD" }}>out of the hidden balance</b> — they receive ordinary XLM and need to set up nothing. This payment&apos;s amount becomes public; the vault&apos;s remaining balance stays hidden.
+            </div>
           </div>
         )}
         {recipientReady === true && (
@@ -301,7 +307,7 @@ export default function Confidential({
           try { wanted = amount.trim() ? toStroops(amount) : null; } catch { wanted = null; }
           const short = wanted != null && wanted > spendable;
           const settleWouldCover = short && wanted != null && wanted <= spendable + settling;
-          const blocked = short || recipientReady === false;
+          const blocked = short;
 
           return (
             <>
@@ -312,24 +318,41 @@ export default function Confidential({
                     : `Only ${formatXLM(spendable)} XLM is ready to send${settling > 0n ? `, with ${formatXLM(settling)} XLM still settling` : ""}. Move more in first.`}
                 </div>
               )}
-              <button
-                onClick={() =>
-                  keys &&
-                  propose("transfer", "Confidential payment", "confidential_transfer", () =>
-                    buildTransferArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
-                  )
-                }
-                disabled={!!busy || !registered || !keys || !recipient.trim() || !amount.trim() || blocked}
-                style={{ ...gold, opacity: registered && keys && recipient.trim() && amount.trim() && !busy && !blocked ? 1 : 0.45, cursor: blocked ? "not-allowed" : "pointer" }}
-              >
-                {busy === "transfer"
-                  ? "Proving in browser…"
-                  : recipientReady === false
-                    ? "Recipient can't receive yet"
+              {recipientReady === false ? (
+                <button
+                  onClick={() =>
+                    keys &&
+                    propose("withdraw", "Payment out of the hidden balance", "withdraw", () =>
+                      buildWithdrawArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
+                    )
+                  }
+                  disabled={!!busy || !registered || !keys || !amount.trim() || short}
+                  style={{ ...gold, opacity: registered && keys && amount.trim() && !busy && !short ? 1 : 0.45, cursor: short ? "not-allowed" : "pointer" }}
+                >
+                  {busy === "withdraw"
+                    ? "Proving in browser…"
+                    : short
+                      ? settleWouldCover ? "Settle first" : "Not enough ready"
+                      : "Pay them in public XLM"}
+                </button>
+              ) : (
+                <button
+                  onClick={() =>
+                    keys &&
+                    propose("transfer", "Confidential payment", "confidential_transfer", () =>
+                      buildTransferArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
+                    )
+                  }
+                  disabled={!!busy || !registered || !keys || !recipient.trim() || !amount.trim() || blocked}
+                  style={{ ...gold, opacity: registered && keys && recipient.trim() && amount.trim() && !busy && !blocked ? 1 : 0.45, cursor: blocked ? "not-allowed" : "pointer" }}
+                >
+                  {busy === "transfer"
+                    ? "Proving in browser…"
                     : blocked
                       ? settleWouldCover ? "Settle first" : "Not enough ready"
                       : "Propose confidential payment"}
-              </button>
+                </button>
+              )}
             </>
           );
         })()}
@@ -338,7 +361,7 @@ export default function Confidential({
       <div style={{ ...card, marginBottom: 0 }}>
         <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#8A857B", marginBottom: 10 }}>WHAT IS AND ISN&apos;T HIDDEN</div>
         <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.7 }}>
-          Amounts are hidden from everyone on-chain. Sender and recipient addresses stay public — this hides <span style={{ color: "#ECE7DD" }}>how much</span>, not <span style={{ color: "#ECE7DD" }}>who</span>.
+          Amounts are hidden from everyone on-chain. Sender and recipient addresses stay public — this hides <span style={{ color: "#ECE7DD" }}>how much</span>, not <span style={{ color: "#ECE7DD" }}>who</span>. A payment to someone without a confidential account reveals that one amount, and nothing else.
           {CONFIG.confidentialAuditorIndex === 0 ? (
             <> Every transfer also emits a ciphertext to a registered auditor, who can open it — confidential and auditable.</>
           ) : (
