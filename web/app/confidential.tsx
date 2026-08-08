@@ -188,12 +188,12 @@ export default function Confidential({
         {balance ? (
           <>
             <div style={{ fontFamily: DISPLAY, fontSize: 38, color: "#ECE7DD", margin: "10px 0 2px" }}>
-              {formatXLM(total)} <span style={{ fontSize: 15, fontFamily: MONO, color: "#8A857B" }}>XLM</span>
+              {formatXLM(spendable)} <span style={{ fontSize: 15, fontFamily: MONO, color: "#8A857B" }}>XLM ready to send</span>
             </div>
             {settling > 0n ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12, borderTop: "1px solid rgba(236,231,221,0.06)", paddingTop: 12 }}>
                 <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>
-                  {formatXLM(settling)} XLM just arrived and can&apos;t be sent until it settles. Incoming funds are held apart so nobody can disturb a payment you&apos;re signing.
+                  <span style={{ color: "#C9A86A" }}>+{formatXLM(settling)} XLM arriving.</span> It can&apos;t be sent until it settles — incoming funds are held apart so nobody can disturb a payment you&apos;re signing. Settling is a proposal like any other.
                 </div>
                 <button
                   onClick={() => propose("settle", "Settling incoming funds", "merge", () => buildMergeArgs(vaultAddress))}
@@ -269,18 +269,41 @@ export default function Confidential({
         </p>
         <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: 10 }} />
         <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00 XLM" disabled={!registered} style={{ ...input, marginBottom: 14 }} />
-        <button
-          onClick={() =>
-            keys &&
-            propose("transfer", "Confidential payment", "confidential_transfer", () =>
-              buildTransferArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
-            )
-          }
-          disabled={!!busy || !registered || !keys || !recipient.trim() || !amount.trim()}
-          style={{ ...gold, opacity: registered && keys && recipient.trim() && amount.trim() && !busy ? 1 : 0.45 }}
-        >
-          {busy === "transfer" ? "Proving in browser…" : "Propose confidential payment"}
-        </button>
+        {(() => {
+          let wanted: bigint | null = null;
+          try { wanted = amount.trim() ? toStroops(amount) : null; } catch { wanted = null; }
+          const short = wanted != null && wanted > spendable;
+          const settleWouldCover = short && wanted != null && wanted <= spendable + settling;
+          const blocked = short;
+
+          return (
+            <>
+              {short && (
+                <div style={{ fontSize: 12.5, color: "#C45D4A", marginBottom: 12, lineHeight: 1.55 }}>
+                  {settleWouldCover
+                    ? `Only ${formatXLM(spendable)} XLM is ready to send. Settle the ${formatXLM(settling)} XLM waiting above first, then this goes through.`
+                    : `Only ${formatXLM(spendable)} XLM is ready to send${settling > 0n ? `, with ${formatXLM(settling)} XLM still settling` : ""}. Move more in first.`}
+                </div>
+              )}
+              <button
+                onClick={() =>
+                  keys &&
+                  propose("transfer", "Confidential payment", "confidential_transfer", () =>
+                    buildTransferArgs(vaultAddress, recipient.trim(), toStroops(amount), keys, fromLedger)
+                  )
+                }
+                disabled={!!busy || !registered || !keys || !recipient.trim() || !amount.trim() || blocked}
+                style={{ ...gold, opacity: registered && keys && recipient.trim() && amount.trim() && !busy && !blocked ? 1 : 0.45, cursor: blocked ? "not-allowed" : "pointer" }}
+              >
+                {busy === "transfer"
+                  ? "Proving in browser…"
+                  : blocked
+                    ? settleWouldCover ? "Settle first" : "Not enough ready"
+                    : "Propose confidential payment"}
+              </button>
+            </>
+          );
+        })()}
       </div>
 
       <div style={{ ...card, marginBottom: 0 }}>

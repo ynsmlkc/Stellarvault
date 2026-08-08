@@ -207,7 +207,14 @@ export async function buildTransferArgs(
   });
   const s = await engine.sync();
   if (s.spendable.v < amount) {
-    throw new Error(`Confidential balance is ${s.spendable.v}, need ${amount}.`);
+    // Only `spendable` can be sent; anything in `receiving` has to settle
+    // first. Say that in XLM, and say what to do about it.
+    const xlm = (v: bigint) => (Number(v) / 1e7).toLocaleString(undefined, { maximumFractionDigits: 7 });
+    const hint =
+      s.receiving.v > 0n
+        ? ` ${xlm(s.receiving.v)} XLM is still settling — settle it first.`
+        : " Move more XLM in first.";
+    throw new Error(`Only ${xlm(s.spendable.v)} XLM is ready to send, need ${xlm(amount)}.${hint}`);
   }
 
   // The recipient's viewing key comes from their on-chain account record; the
