@@ -1040,7 +1040,7 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail version={p.version} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
@@ -1468,10 +1468,10 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
-  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number;
+  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1523,6 +1523,26 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, go, vaultAddre
           </div>
         </div>
       </div>
+
+      {/* The upgrade notice used to live only in Guards, which is not where
+          anyone proposes or approves. A vault whose rules can be bypassed has
+          to say so where the risk is taken. */}
+      {version !== null && version < CURRENT_VERSION && (
+        <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 12, background: "#100d0d", padding: 16, marginBottom: 20 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>
+            RUNNING OLDER CODE · v{version} of v{CURRENT_VERSION}
+          </div>
+          <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 10 }}>
+            A vault keeps the code it was deployed with. On this one:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#8A857B", lineHeight: 1.7 }}>
+            {gapsFor(version).map((r) => <li key={r}>{r}</li>)}
+          </ul>
+          <button onClick={() => go("guards")} style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(201,168,106,0.42)", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
+            Upgrade it in Guards →
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24, alignItems: "start" }}>
         <div>
@@ -2213,6 +2233,23 @@ const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hou
  */
 const CURRENT_VERSION = 7;
 
+/**
+ * What a vault below `CURRENT_VERSION` is still missing, worst first.
+ *
+ * Written out rather than summarised as "some features are missing", because
+ * these are not features — they are the reasons the vault's own rules can be
+ * bypassed, and someone deciding whether to keep using it needs the specifics.
+ */
+const VERSION_GAPS: { from: number; risk: string }[] = [
+  { from: 5, risk: "the owner alone can change the signer set, clear the guards or replace the code — no co-signer needed" },
+  { from: 7, risk: "an approval keeps counting after that signer is removed, so a departing member's vote can still carry a payment" },
+  { from: 6, risk: "a proposal at its threshold needs a separate Execute; it cannot settle on the final approval" },
+];
+
+function gapsFor(version: number): string[] {
+  return VERSION_GAPS.filter((g) => version < g.from).map((g) => g.risk);
+}
+
 function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
   policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[]; version: number | null;
@@ -2302,11 +2339,11 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
             <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
             <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
-              This vault runs older code than new vaults are created with, so some features are missing or will fail when executed.
-              {version < CURRENT_VERSION && version >= 2 && (
-                <> More to the point, below v{CURRENT_VERSION} its rules are not m-of-n: the owner alone can change the signer set, clear the guards or replace the code, without asking a co-signer.</>
-              )}
-              {" "}Upgrading keeps its address, balance, signers and guards exactly as they are.
+              This vault runs older code than new vaults are created with:
+              <ul style={{ margin: "9px 0 0", paddingLeft: 18, color: "#8A857B", lineHeight: 1.7 }}>
+                {gapsFor(version).map((r) => <li key={r}>{r}</li>)}
+              </ul>
+              <div style={{ marginTop: 9 }}>Upgrading keeps its address, balance, signers and guards exactly as they are.</div>
             </div>
             {isSigner ? (
               <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
