@@ -54,6 +54,8 @@ import {
   type CallArgType,
   type CallSpec,
 } from "@/lib/contract";
+import { registerConfidentialAccount } from "@/lib/contract";
+import { isRegistered, walletConfidentialKey, buildRegisterArgs } from "@/lib/confidential";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
 import Confidential from "./confidential";
 
@@ -688,7 +690,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -956,6 +958,7 @@ type ShellProps = {
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
+  onToast: (t: ToastMsg) => void;
   version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 };
@@ -996,13 +999,7 @@ function AppShell(p: ShellProps) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 7, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
-          <button className="h-wallet" style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(201,168,106,0.08)", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 9, padding: "7px 12px", cursor: "pointer", fontFamily: SANS }}>
-            <span style={{ width: 22, height: 22, borderRadius: "50%", background: GRAD_A }} />
-            <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.2 }}>
-              <span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{p.wallet ? shortAddr(p.wallet, 6, 4) : "Not connected"}</span>
-              <span style={{ fontSize: 10, color: "#8A857B" }}>{p.wallet ? "Freighter" : "demo mode"}</span>
-            </span>
-          </button>
+          <WalletMenu wallet={p.wallet} onToast={p.onToast} />
         </div>
       </div>
 
@@ -1025,6 +1022,124 @@ function AppShell(p: ShellProps) {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================ WALLET MENU ============================ */
+
+/**
+ * The header's address chip, opened.
+ *
+ * It holds one real setting: whether this wallet has a confidential account of
+ * its own. That belongs here and nowhere else — a confidential account is a
+ * property of an ADDRESS, so a screen inside one vault would be the wrong home
+ * for it, and the wallet chip is reachable from every screen.
+ *
+ * It also answers the question that sends people looking: a vault's setup
+ * registers the VAULT, so the wallet that owns it stays unregistered and cannot
+ * be paid confidentially. This is where that gets fixed, in one transaction —
+ * no vault, no proposal, no threshold, because a wallet authorises itself.
+ */
+function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: ToastMsg) => void }) {
+  const [open, setOpen] = useState(false);
+  const [reg, setReg] = useState<boolean | null>(null); // null = not looked yet
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const box = useRef<HTMLDivElement | null>(null);
+
+  // Only checked once the menu is opened: it costs an RPC round-trip and pulls
+  // in the confidential SDK, neither of which the header needs to render.
+  useEffect(() => {
+    if (!open || !wallet || reg !== null) return;
+    let live = true;
+    isRegistered(wallet)
+      .then((r) => live && setReg(r))
+      .catch(() => live && setReg(false));
+    return () => { live = false; };
+  }, [open, wallet, reg]);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+
+  const enable = async () => {
+    if (!wallet) return;
+    setBusy(true);
+    try {
+      const keys = await walletConfidentialKey(wallet);
+      const args = await buildRegisterArgs(wallet, keys);
+      await registerConfidentialAccount(wallet, args);
+      setReg(true);
+      onToast({ title: "Confidential account ready", sub: "This address can now be paid confidentially — amounts hidden on-chain.", tone: "ok" });
+    } catch (e) {
+      onToast({ title: "Could not set it up", sub: describeError(e), tone: "err" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = () => {
+    if (!wallet) return;
+    navigator.clipboard.writeText(wallet);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  return (
+    <div ref={box} style={{ position: "relative" }}>
+      <button onClick={() => wallet && setOpen((o) => !o)} className="h-wallet" style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(201,168,106,0.08)", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 9, padding: "7px 12px", cursor: wallet ? "pointer" : "default", fontFamily: SANS }}>
+        <span style={{ width: 22, height: 22, borderRadius: "50%", background: GRAD_A }} />
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.2 }}>
+          <span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{wallet ? shortAddr(wallet, 6, 4) : "Not connected"}</span>
+          <span style={{ fontSize: 10, color: "#8A857B" }}>{wallet ? "Freighter" : "demo mode"}</span>
+        </span>
+        {wallet && <span style={{ fontSize: 9, color: "#8A857B", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>}
+      </button>
+
+      {open && wallet && (
+        <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: 340, background: "#121214", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: 16, boxShadow: "0 18px 50px rgba(0,0,0,0.55)", zIndex: 60 }}>
+          <div style={{ fontSize: 10, letterSpacing: ".12em", color: "#8A857B", marginBottom: 7 }}>YOUR ADDRESS</div>
+          <div style={{ fontFamily: MONO, fontSize: 11, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.55, marginBottom: 9 }}>{wallet}</div>
+          <button onClick={copy} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: copied ? "#7FB069" : "#8A857B", fontFamily: SANS, fontSize: 11.5, borderRadius: 7, padding: "5px 11px", cursor: "pointer" }}>
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+
+          <div style={{ height: 1, background: "rgba(236,231,221,0.09)", margin: "16px -16px 15px" }} />
+
+          <div style={{ fontSize: 10, letterSpacing: ".12em", color: "#8A857B", marginBottom: 8 }}>CONFIDENTIAL ACCOUNT</div>
+
+          {reg === null && <div style={{ fontSize: 12.5, color: "#8A857B" }}>Checking…</div>}
+
+          {reg === true && (
+            <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65 }}>
+              <span style={{ color: "#7FB069" }}>✓ Ready</span> — anyone can pay this address confidentially, with the amount hidden on-chain.
+            </div>
+          )}
+
+          {reg === false && (
+            <>
+              <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
+                Not set up. A confidential payment encrypts its amount to the recipient&apos;s key, so an address without one cannot receive it.
+                <div style={{ color: "#8A857B", marginTop: 7 }}>
+                  This is your wallet, separate from any vault — setting up a vault&apos;s hidden balance registers the vault, not you.
+                </div>
+              </div>
+              <button onClick={enable} disabled={busy} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 13, padding: "10px 14px", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.75 : 1 }}>
+                {busy ? "Setting up…" : "Set up — one transaction"}
+              </button>
+              <div style={{ fontSize: 11, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
+                One signature to derive your key, then one transaction. Nothing is stored — the key regenerates from that signature whenever it&apos;s needed.
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

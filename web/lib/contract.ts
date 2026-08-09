@@ -657,3 +657,13 @@ export const proposeBatch = (
 /** Deposit = a plain token transfer to the vault's own address (Safe-style). */
 export const depositToVault = (vaultAddr: string, from: string, amountStroops: bigint) =>
   invoke(CONFIG.tokenId, "transfer", [addr(from), addr(vaultAddr), i128(amountStroops)], from);
+
+/**
+ * `register` on the confidential token, signed by a plain wallet for itself.
+ *
+ * The vault path routes the same call through a proposal because a vault can
+ * only act by threshold. A wallet is its own authority, so this is one ordinary
+ * transaction — and it is what makes that wallet payable confidentially.
+ */
+export const registerConfidentialAccount = (wallet: string, args: xdr.ScVal[]) =>
+  invoke(CONFIG.confidentialTokenId, "register", args, wallet);

@@ -89,9 +89,32 @@ function client(m: any) {
  * modulus, so it is reduced rather than truncated.
  */
 export async function vaultConfidentialKey(vaultAddress: string): Promise<any> {
+  return keyFromSignature(
+    `Stellar Vault — confidential key v1\nVault: ${vaultAddress}\n\nSigning this derives the vault's confidential viewing key. It never leaves this device.`
+  );
+}
+
+/**
+ * A plain wallet's own Grumpkin key.
+ *
+ * A confidential account belongs to whatever address registered it, and an
+ * address can be a vault or an ordinary account — the token contract does not
+ * distinguish. This is the second case: someone who wants to *receive* a
+ * confidential payment without standing up a vault to hold it.
+ *
+ * The message is deliberately different from the vault one. Same wallet, two
+ * roles, two keys: if it signed the vault's message here, one signature would
+ * unlock both, and the vault key is meant to be the vault's.
+ */
+export async function walletConfidentialKey(wallet: string): Promise<any> {
+  return keyFromSignature(
+    `Stellar Vault — confidential key v1\nAccount: ${wallet}\n\nSigning this derives your account's own confidential key. It never leaves this device.`
+  );
+}
+
+async function keyFromSignature(message: string): Promise<any> {
   const m = await sdk();
   const freighter = await import("@stellar/freighter-api");
-  const message = `Stellar Vault — confidential key v1\nVault: ${vaultAddress}\n\nSigning this derives the vault's confidential viewing key. It never leaves this device.`;
   const res: any = await freighter.signMessage(message);
   if (res?.error) throw new Error(String(res.error));
 

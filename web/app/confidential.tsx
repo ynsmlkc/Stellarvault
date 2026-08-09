@@ -293,7 +293,7 @@ export default function Confidential({
             <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 4 }}>
               This address has no confidential account, so there is no key to encrypt the amount to.
               {recipient.trim().startsWith("G") && (
-                <> A confidential account belongs to a <b>vault</b>, not to the wallet that owns it — if you set one up, the address you want is that vault&apos;s (<span style={{ fontFamily: MONO }}>C…</span>), which you&apos;ll find at the top of its page.</>
+                <> Setting up a vault&apos;s hidden balance registers the <b>vault</b>, not the wallet that owns it — so if you meant a vault, use its <span style={{ fontFamily: MONO }}>C…</span> address. If you did mean this wallet, its owner can set it up in one transaction from the address menu, top right.</>
               )}
             </div>
             <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.6 }}>
