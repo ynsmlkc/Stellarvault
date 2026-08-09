@@ -287,11 +287,14 @@ export default function Confidential({
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
           If the recipient has a confidential account, the amount is encrypted to their key and stays hidden. If they don&apos;t, you can still pay them out of this balance in ordinary XLM — that payment&apos;s amount becomes public, the rest of the balance doesn&apos;t. Either way the proof is generated in this browser and takes a few seconds.
         </p>
-        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="G… recipient" disabled={!registered} style={{ ...input, marginBottom: recipientReady === false ? 8 : 10, borderColor: recipientReady === false ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)" }} />
+        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="C… another vault, or G… a plain account" disabled={!registered} style={{ ...input, marginBottom: recipientReady === false ? 8 : 10, borderColor: recipientReady === false ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)" }} />
         {recipientReady === false && (
           <div style={{ border: "1px solid rgba(201,168,106,0.3)", borderRadius: 10, background: "#0c0c0d", padding: 14, marginBottom: 12 }}>
             <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 4 }}>
               This address has no confidential account, so there is no key to encrypt the amount to.
+              {recipient.trim().startsWith("G") && (
+                <> A confidential account belongs to a <b>vault</b>, not to the wallet that owns it — if you set one up, the address you want is that vault&apos;s (<span style={{ fontFamily: MONO }}>C…</span>), which you&apos;ll find at the top of its page.</>
+              )}
             </div>
             <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.6 }}>
               You can still pay them <b style={{ color: "#ECE7DD" }}>out of the hidden balance</b> — they receive ordinary XLM and need to set up nothing. This payment&apos;s amount becomes public; the vault&apos;s remaining balance stays hidden.
