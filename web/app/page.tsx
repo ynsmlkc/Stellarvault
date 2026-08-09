@@ -41,6 +41,7 @@ import {
   getFactoryWasm,
   upgradeVaultDirect,
   getRetiredBefore,
+  getVaultWasm,
   describeAdmin,
   describeError,
   OPEN_POLICY,
@@ -183,6 +184,8 @@ export default function Page() {
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
   const [admins, setAdmins] = useState<Record<number, AdminAction>>({});
   const [retiredBefore, setRetiredBefore] = useState(0);
+  // null = not known yet; true means the vault runs code older than the factory serves
+  const [behind, setBehind] = useState<boolean | null>(null);
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
@@ -223,6 +226,11 @@ export default function Page() {
       // which proposals are contract calls, and which change the vault's own
       // rules — both look like zero-amount transfers to self in `Proposal`
       setRetiredBefore(await getRetiredBefore(addr));
+
+      // Is this vault behind? Asked of the chain, not of a constant: compare the
+      // WASM it runs against the one the factory serves.
+      const [mine, current] = await Promise.all([getVaultWasm(addr), getFactoryWasm()]);
+      setBehind(mine && current ? mine !== current : null);
 
       const [cs, ad] = await Promise.all([
         Promise.all(p.map((x) => getCall(addr, x.id))),
@@ -760,7 +768,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} admins={admins}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} retiredBefore={retiredBefore} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} retiredBefore={retiredBefore} behind={behind} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -1028,7 +1036,7 @@ type ShellProps = {
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
-  onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void; retiredBefore: number;
+  onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void; retiredBefore: number; behind: boolean | null;
   onToast: (t: ToastMsg) => void;
   version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
@@ -1077,9 +1085,9 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail version={p.version} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail version={p.version} behind={p.behind} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
-        {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
+        {p.screen === "guards" && <Guards behind={p.behind} go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
           <Confidential
             wallet={p.wallet}
@@ -1505,10 +1513,10 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, retiredBefore, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behind, retiredBefore, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
-  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null; retiredBefore: number;
+  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null; behind: boolean | null; retiredBefore: number;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1568,16 +1576,16 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, retir
       {/* The upgrade notice used to live only in Guards, which is not where
           anyone proposes or approves. A vault whose rules can be bypassed has
           to say so where the risk is taken. */}
-      {version !== null && version < CURRENT_VERSION && (
+      {behind && (
         <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 12, background: "#100d0d", padding: 16, marginBottom: 20 }}>
           <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>
-            RUNNING OLDER CODE · v{version} of v{CURRENT_VERSION}
+            RUNNING OLDER CODE{version !== null ? ` · v${version}` : ""}
           </div>
           <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 10 }}>
             A vault keeps the code it was deployed with. On this one:
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#8A857B", lineHeight: 1.7 }}>
-            {gapsFor(version).map((r) => <li key={r}>{r}</li>)}
+            {gapsFor(version ?? 0).map((r) => <li key={r}>{r}</li>)}
           </ul>
           <button onClick={() => go("guards")} style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(201,168,106,0.42)", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
             Upgrade it in Guards →
@@ -2305,18 +2313,18 @@ const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hou
  * the code; below v6 a proposal at its threshold still needs a separate
  * Execute; below v7 an approval keeps counting after its signer is removed.
  */
-const CURRENT_VERSION = 7;
-
 /**
- * What a vault below `CURRENT_VERSION` is still missing, worst first.
+ * What each build fixed, worst first — used to explain a vault that is behind.
  *
- * Written out rather than summarised as "some features are missing", because
- * these are not features — they are the reasons the vault's own rules can be
- * bypassed, and someone deciding whether to keep using it needs the specifics.
+ * Whether it IS behind is not decided here: that comes from comparing the
+ * vault's own WASM against the factory's, which cannot drift. This list only
+ * turns that fact into a sentence, and a missing entry costs a line of
+ * explanation rather than a silent all-clear.
  */
 const VERSION_GAPS: { from: number; risk: string }[] = [
   { from: 5, risk: "the owner alone can change the signer set, clear the guards or replace the code — no co-signer needed" },
   { from: 7, risk: "an approval keeps counting after that signer is removed, so a departing member's vote can still carry a payment" },
+  { from: 8, risk: "a proposal retired by a signer change stays in the pending list, and only its proposer can clear it" },
   { from: 6, risk: "a proposal at its threshold needs a separate Execute; it cannot settle on the final approval" },
 ];
 
@@ -2324,10 +2332,11 @@ function gapsFor(version: number): string[] {
   return VERSION_GAPS.filter((g) => version < g.from).map((g) => g.risk);
 }
 
-function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
+function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
   policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[]; version: number | null;
   onUpgrade: () => void;
+  behind: boolean | null;
   onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
   // Governance moved from the owner to the threshold, so the question this
@@ -2409,13 +2418,13 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           </div>
         </div>
       ) : (
-        version < CURRENT_VERSION && (
+        behind && (
           <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
             <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
             <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
               This vault runs older code than new vaults are created with:
               <ul style={{ margin: "9px 0 0", paddingLeft: 18, color: "#8A857B", lineHeight: 1.7 }}>
-                {gapsFor(version).map((r) => <li key={r}>{r}</li>)}
+                {gapsFor(version ?? 0).map((r) => <li key={r}>{r}</li>)}
               </ul>
               <div style={{ marginTop: 9 }}>Upgrading keeps its address, balance, signers and guards exactly as they are.</div>
             </div>

@@ -292,6 +292,26 @@ export async function getRetiredBefore(vaultAddr: string): Promise<number> {
   }
 }
 
+/**
+ * The WASM this vault actually runs, read from its contract instance.
+ *
+ * Compared against the factory's, this answers "is this vault behind" exactly,
+ * with nothing to keep in step by hand. A hardcoded `CURRENT_VERSION` has now
+ * drifted twice — once as `version < 4` left every v4 vault reading as current
+ * the moment the contract went to v5, once as a constant left at 7 after the
+ * contract reached 8 — and both times the screen that exists to warn people
+ * went quiet.
+ */
+export async function getVaultWasm(vaultAddr: string): Promise<string | null> {
+  try {
+    const e = await server.getContractData(vaultAddr, xdr.ScVal.scvLedgerKeyContractInstance());
+    const exec = (e.val as any).contractData().val().instance().executable();
+    return Buffer.from(exec.wasmHash()).toString("hex");
+  } catch {
+    return null;
+  }
+}
+
 export async function getVersion(vaultAddr: string): Promise<number | null> {
   try {
     return Number(await simulate(vaultAddr, "version", []));
