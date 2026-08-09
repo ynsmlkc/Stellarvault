@@ -290,3 +290,26 @@ Verified live on the test vault above:
   signer2 proposes #0 and approves it
   RemoveSigner(signer2) passes            -> retired_before = 2
   deployer (a different signer) cancels #0 -> cancelled = true
+
+--- 2026-08-09 · vault-instance v9 (an upgrade retires open proposals) ---
+wasm hash    2e197df19eb818dc0e8a83f589e467ead10f7ae1c85e7b6c9b0440c18c0ef571
+test vault   CAWHK5PGJFE2THOVLWQDKB7A4SDANWAMEAKHKGTJFA7RZ3A7XD36OSDF
+
+Found on a live vault (CBMMPQNW…, TEST 1): v7 recorded retirement per proposal
+under DataKey::Epoch, v8 replaced that with the RETIRED watermark, and upgrading
+between them orphaned the old record. Proposal #8 — made and approved by a
+signer who was later removed in #9 — went back to being live, because v8 read
+RETIRED, found nothing, and reported retired_before = 0.
+
+v9 makes AdminAction::Upgrade retire open proposals before swapping the code.
+New code can redefine what any stored value means, so nothing approved under the
+old rules should carry into the new ones.
+
+FORWARD-LOOKING ONLY. An upgrade is executed by the code that is running, so
+v8 -> v9 does not retire; v9 -> v10 will. Verified on the test vault:
+  v8, payment #2 with 1 approval, upgrade to v9 -> retired_before unchanged (2)
+  then AddSigner on v9                          -> retired_before = 5
+  execute #2                                     -> Error(Contract, #32)
+
+A vault already carrying orphaned state clears it with any signer change, which
+sets the watermark to the current tx id.

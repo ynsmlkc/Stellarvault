@@ -66,7 +66,8 @@ const RETIRED: Symbol = symbol_short!("retired");
 ///   6 — the final approval can settle the proposal in the same transaction
 ///   7 — a signer-set change retires the proposals it would have decided
 ///   8 — retired proposals are visible as such, and any signer can clear them
-const VERSION: u32 = 8;
+///   9 — an upgrade retires them too: new code can redefine what state means
+const VERSION: u32 = 9;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -1225,6 +1226,20 @@ impl VaultInstance {
                 OwnershipTransferredEvent { from: old, to: a.clone() }.publish(env);
             }
             AdminAction::Upgrade(hash) => {
+                // An upgrade retires the open proposals too.
+                //
+                // Not caution for its own sake: v7 recorded retirement per
+                // proposal and v8 replaced that with one watermark, so
+                // upgrading a live vault orphaned the old record and a proposal
+                // that had been retired came back to life — carrying the
+                // approval of a signer who had since been removed. The bug
+                // those versions exist to prevent, reintroduced by the fix.
+                //
+                // New code can redefine what any stored value means. Nothing
+                // approved under the old rules should quietly carry into the
+                // new ones, and re-proposing is cheap next to finding out the
+                // hard way which state did not survive.
+                Self::retire_open_proposals(env);
                 env.deployer().update_current_contract_wasm(hash.clone());
             }
         }

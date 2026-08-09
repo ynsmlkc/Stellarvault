@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 8);
+    assert_eq!(s.vault.version(), 9);
 }
 
 #[test]
@@ -1460,3 +1460,33 @@ fn test_the_final_approval_settles_a_rule_change() {
 
 
 
+
+/// An upgrade retires open proposals, alongside the signer-set changes above.
+///
+/// v7 recorded retirement per proposal, v8 replaced that with one watermark,
+/// and upgrading between them orphaned the old record — a proposal that had
+/// been retired came back to life still holding the approval of a signer who
+/// was removed. Whatever the next storage change is, this closes the same door
+/// ahead of it.
+///
+/// The SUCCESSFUL upgrade path is not covered here and is verified on testnet
+/// instead (see deployments/testnet/addresses.txt): it needs a real uploaded
+/// contract, and the test host rejects anything without a Soroban metadata
+/// section while CI runs `cargo test` without building WASM. What is covered is
+/// that a failed one changes nothing, which is the property that makes the
+/// ordering safe to rely on.
+#[test]
+fn test_a_failed_upgrade_leaves_everything_alone() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &400, &false);
+    let up = s.vault.propose_admin(
+        &s.signer(0),
+        &AdminAction::Upgrade(BytesN::from_array(&s.env, &[9u8; 32])), // no such code
+    );
+    s.vault.approve(&up, &s.signer(0));
+    s.vault.approve(&up, &s.signer(1));
+    assert!(s.vault.try_execute(&up, &s.signer(0)).is_err());
+
+    assert_eq!(s.vault.retired_before(), 0, "nothing retired");
+    s.vault.approve(&tx, &s.signer(0)); // and the proposal is untouched
+}
