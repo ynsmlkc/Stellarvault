@@ -54,8 +54,8 @@ import {
   type CallArgType,
   type CallSpec,
 } from "@/lib/contract";
-import { registerConfidentialAccount } from "@/lib/contract";
-import { isRegistered, walletConfidentialKey, buildRegisterArgs } from "@/lib/confidential";
+import { registerConfidentialAccount, confidentialMergeSelf, confidentialWithdrawSelf } from "@/lib/contract";
+import { isRegistered, walletConfidentialKey, buildRegisterArgs, readConfidentialBalance, buildMergeArgs, buildWithdrawArgs, type ConfidentialBalance } from "@/lib/confidential";
 import { generateVoteProof, verifyVoteProof, secretFromSeed, signerKey, myCommitment, rootOf } from "@/lib/prover";
 import Confidential from "./confidential";
 
@@ -1026,6 +1026,13 @@ function AppShell(p: ShellProps) {
   );
 }
 
+/** "12.5" → stroops, or null when it is not a usable amount. */
+function toStroopsSafe(s: string): bigint | null {
+  const n = Number(s.trim().replace(",", "."));
+  if (!isFinite(n) || n <= 0) return null;
+  return BigInt(Math.round(n * 1e7));
+}
+
 /* ============================ WALLET MENU ============================ */
 
 /**
@@ -1044,8 +1051,11 @@ function AppShell(p: ShellProps) {
 function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: ToastMsg) => void }) {
   const [open, setOpen] = useState(false);
   const [reg, setReg] = useState<boolean | null>(null); // null = not looked yet
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [keys, setKeys] = useState<any>(null);
+  const [bal, setBal] = useState<ConfidentialBalance | null>(null);
+  const [amount, setAmount] = useState("");
   const box = useRef<HTMLDivElement | null>(null);
 
   // Only checked once the menu is opened: it costs an RPC round-trip and pulls
@@ -1068,19 +1078,38 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
     return () => document.removeEventListener("mousedown", away);
   }, [open]);
 
+  /** Run `job`, then re-read the balance, with one busy label throughout. */
+  const run = async (label: string, job: (k: any) => Promise<void>, ok?: { title: string; sub: string }) => {
+    if (!wallet) return;
+    setBusy(label);
+    try {
+      const k = keys ?? (await walletConfidentialKey(wallet));
+      setKeys(k);
+      await job(k);
+      setBal(await readConfidentialBalance(wallet, k, CONFIG.confidentialFromLedger));
+      if (ok) onToast({ ...ok, tone: "ok" });
+    } catch (e) {
+      onToast({ title: `${label} failed`, sub: describeError(e), tone: "err" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const enable = async () => {
     if (!wallet) return;
-    setBusy(true);
+    setBusy("Setup");
     try {
-      const keys = await walletConfidentialKey(wallet);
-      const args = await buildRegisterArgs(wallet, keys);
+      const k = await walletConfidentialKey(wallet);
+      const args = await buildRegisterArgs(wallet, k);
       await registerConfidentialAccount(wallet, args);
+      setKeys(k);
       setReg(true);
+      setBal({ spendable: 0n, receiving: 0n });
       onToast({ title: "Confidential account ready", sub: "This address can now be paid confidentially — amounts hidden on-chain.", tone: "ok" });
     } catch (e) {
       onToast({ title: "Could not set it up", sub: describeError(e), tone: "err" });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -1116,10 +1145,62 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
 
           {reg === null && <div style={{ fontSize: 12.5, color: "#8A857B" }}>Checking…</div>}
 
-          {reg === true && (
-            <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65 }}>
-              <span style={{ color: "#7FB069" }}>✓ Ready</span> — anyone can pay this address confidentially, with the amount hidden on-chain.
-            </div>
+          {reg === true && !bal && (
+            <>
+              <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
+                <span style={{ color: "#7FB069" }}>✓ Ready</span> — anyone can pay this address confidentially, with the amount hidden on-chain.
+              </div>
+              {/* The balance is a commitment: the chain stores it, but only this
+                  key can read it, so it takes a signature to show a number. */}
+              <button onClick={() => run("Unlock", async () => {})} disabled={!!busy} style={{ width: "100%", background: "transparent", border: "1px solid rgba(201,168,106,0.4)", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, padding: "9px 14px", borderRadius: 8, cursor: busy ? "wait" : "pointer" }}>
+                {busy === "Unlock" ? "Reading…" : "Show balance"}
+              </button>
+              <div style={{ fontSize: 11, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
+                Signature only — no transaction, no fee.
+              </div>
+            </>
+          )}
+
+          {reg === true && bal && (
+            <>
+              <div style={{ fontFamily: DISPLAY, fontSize: 27, color: "#ECE7DD", lineHeight: 1.15 }}>
+                {formatXLM(bal.spendable)} <span style={{ fontSize: 13, color: "#8A857B", fontFamily: SANS }}>XLM ready</span>
+              </div>
+
+              {bal.receiving > 0n && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10, padding: "9px 11px", background: "rgba(201,168,106,0.07)", border: "1px solid rgba(201,168,106,0.22)", borderRadius: 8 }}>
+                  <span style={{ fontSize: 12, color: "#ECE7DD" }}>+{formatXLM(bal.receiving)} XLM arriving</span>
+                  <button onClick={() => run("Settle", async (k) => { await confidentialMergeSelf(wallet, await buildMergeArgs(wallet)); }, { title: "Settled", sub: "It moved into your ready balance and can be withdrawn." })} disabled={!!busy} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: 11.5, padding: "6px 12px", borderRadius: 6, cursor: busy ? "wait" : "pointer" }}>
+                    {busy === "Settle" ? "…" : "Settle"}
+                  </button>
+                </div>
+              )}
+
+              {/* Payments arrive hidden; this is the way back out to ordinary
+                  XLM. The amount becomes public on the way — what stays hidden
+                  is whatever is left behind. */}
+              <div style={{ marginTop: 13 }}>
+                <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Withdraw to your XLM balance</div>
+                <div style={{ display: "flex", gap: 7 }}>
+                  <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" inputMode="decimal" style={{ flex: 1, minWidth: 0, background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: 7, padding: "8px 10px", color: "#ECE7DD", fontFamily: MONO, fontSize: 12.5, outline: "none" }} />
+                  <button
+                    onClick={() => run("Withdraw", async (k) => {
+                      const st = toStroopsSafe(amount);
+                      if (!st) throw new Error("Enter an amount first.");
+                      await confidentialWithdrawSelf(wallet, await buildWithdrawArgs(wallet, wallet, st, k, CONFIG.confidentialFromLedger));
+                      setAmount("");
+                    }, { title: "Withdrawn", sub: "It is ordinary XLM in this wallet now — visible in Freighter." })}
+                    disabled={!!busy || !amount.trim()}
+                    style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: 12, padding: "8px 14px", borderRadius: 7, cursor: busy ? "wait" : "pointer", opacity: !amount.trim() ? 0.45 : 1, whiteSpace: "nowrap" }}
+                  >
+                    {busy === "Withdraw" ? "Proving…" : "Withdraw"}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "#8A857B", marginTop: 7, lineHeight: 1.55 }}>
+                  This amount becomes public; the rest of your hidden balance stays hidden.
+                </div>
+              </div>
+            </>
           )}
 
           {reg === false && (
@@ -1130,8 +1211,8 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
                   This is your wallet, separate from any vault — setting up a vault&apos;s hidden balance registers the vault, not you.
                 </div>
               </div>
-              <button onClick={enable} disabled={busy} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 13, padding: "10px 14px", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.75 : 1 }}>
-                {busy ? "Setting up…" : "Set up — one transaction"}
+              <button onClick={enable} disabled={!!busy} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 13, padding: "10px 14px", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.75 : 1 }}>
+                {busy === "Setup" ? "Setting up…" : "Set up — one transaction"}
               </button>
               <div style={{ fontSize: 11, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
                 One signature to derive your key, then one transaction. Nothing is stored — the key regenerates from that signature whenever it&apos;s needed.

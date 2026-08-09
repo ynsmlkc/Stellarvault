@@ -667,3 +667,11 @@ export const depositToVault = (vaultAddr: string, from: string, amountStroops: b
  */
 export const registerConfidentialAccount = (wallet: string, args: xdr.ScVal[]) =>
   invoke(CONFIG.confidentialTokenId, "register", args, wallet);
+
+/** `merge` on the confidential token, for a wallet's own account. */
+export const confidentialMergeSelf = (wallet: string, args: xdr.ScVal[]) =>
+  invoke(CONFIG.confidentialTokenId, "merge", args, wallet);
+
+/** `withdraw` on the confidential token, for a wallet's own account. */
+export const confidentialWithdrawSelf = (wallet: string, args: xdr.ScVal[]) =>
+  invoke(CONFIG.confidentialTokenId, "withdraw", args, wallet);
