@@ -2039,6 +2039,16 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 const CAP_WINDOWS: [string, number][] = [["1 hour", 720], ["6 hours", 4320], ["1 day", 17280], ["1 week", 120960]];
 const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hour", 720], ["1 day", 17280]];
 
+/**
+ * The build new vaults are created with. A vault below this is running older
+ * code and the Guards screen says so — which only works if this number moves
+ * with the contract's `VERSION`.
+ *
+ * 5 is the first build where governance needs the threshold: below it, the
+ * owner alone can change the signer set, clear the guards or swap the code.
+ */
+const CURRENT_VERSION = 5;
+
 function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;
   policy: Policy; allowed: string[]; spent: bigint; busy: string | null; zkConfig: ZkConfig | null; allowedContracts: string[]; version: number | null;
@@ -2124,11 +2134,15 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           </div>
         </div>
       ) : (
-        version < 4 && (
+        version < CURRENT_VERSION && (
           <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
             <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
             <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
-              This vault runs older code than new vaults are created with, so some features are missing or will fail when executed. Upgrading keeps its address, balance, signers and guards exactly as they are.
+              This vault runs older code than new vaults are created with, so some features are missing or will fail when executed.
+              {version < CURRENT_VERSION && version >= 2 && (
+                <> More to the point, below v{CURRENT_VERSION} its rules are not m-of-n: the owner alone can change the signer set, clear the guards or replace the code, without asking a co-signer.</>
+              )}
+              {" "}Upgrading keeps its address, balance, signers and guards exactly as they are.
             </div>
             {isSigner ? (
               <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
