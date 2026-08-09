@@ -445,6 +445,21 @@ export const proposeTransaction = (
 export const approve = (vaultAddr: string, txId: number, signer: string) =>
   invoke(vaultAddr, "approve", [u64(txId), addr(signer)], signer);
 
+/**
+ * Approve, and settle the proposal in the same transaction if that approval was
+ * the last one needed.
+ *
+ * A contract cannot act on its own, so a proposal at its threshold still has to
+ * be pushed by somebody. Having the final approver push it is one signature
+ * rather than two, and removes the state where a payment everyone agreed on sits
+ * waiting for a click. If it is not ready — threshold not met, time-lock still
+ * running — the vault records the approval and stops.
+ *
+ * Only on v6 and above; `doApprove` falls back to plain `approve`.
+ */
+export const approveAndExecute = (vaultAddr: string, txId: number, signer: string) =>
+  invoke(vaultAddr, "approve_and_execute", [u64(txId), addr(signer)], signer);
+
 /* ---- ZK approval (private mode) ---- */
 export function fieldTo32(dec: string): Uint8Array {
   let h = BigInt(dec).toString(16);

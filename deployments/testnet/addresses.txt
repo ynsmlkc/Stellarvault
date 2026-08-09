@@ -219,3 +219,16 @@ Verified live on the test vault above:
 Existing v4 vaults keep owner-only governance until they upgrade. Their owner
 can still call `upgrade` (that is v4 code); once on v5 that power is gone and a
 further upgrade needs the threshold.
+
+--- 2026-08-09 · vault-instance v6 (the final approval settles) ---
+wasm hash    d6e1d33ae7d560c4548075f93ace46aa729f439ced0bf746f7e40b6f04f97edc
+test vault   CDPBEEZ37RXKURXJK7SAMJAI3Z6ABWPZU7OIDPSKD7PDZUM3SRN3B4BL  (2-of-3)
+
+approve_and_execute: approves, and settles in the same transaction when that was
+the last approval needed. Not ready — threshold unmet, or the time-lock still
+running — records the approval and stops, so the approver never signs for a
+transaction that rolls their own approval back.
+
+Verified live on the test vault above:
+  approve_and_execute #1 of 2 -> executed = false
+  approve_and_execute #2 of 2 -> executed = true, 1 XLM moved, no separate Execute

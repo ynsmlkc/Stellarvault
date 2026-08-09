@@ -56,7 +56,8 @@ const COMMITS: Symbol = symbol_short!("commits");
 ///   3 — on-chain proof verification + arbitrary contract calls
 ///   4 — signature-derived signer keys + anonymous (unauthenticated) approval
 ///   5 — governance by proposal: no owner-only path to any rule change
-const VERSION: u32 = 5;
+///   6 — the final approval can settle the proposal in the same transaction
+const VERSION: u32 = 6;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -579,6 +580,36 @@ impl VaultInstance {
     /// and its public inputs are pinned to this vault and this proposal. Before
     /// that, the vault only records the nullifier — see [`set_zk_config`] for
     /// why that weaker mode still exists.
+    /// Approve, and settle it in the same transaction if that was the last
+    /// approval needed.
+    ///
+    /// A contract cannot act on its own — there is no scheduler, and every state
+    /// change needs a transaction somebody signs and pays for — so a proposal
+    /// that has reached its threshold still has to be pushed. Making the final
+    /// approver push it is one signature instead of two, and removes the state
+    /// where a proposal is fully approved and simply sitting there.
+    ///
+    /// If it is not ready — threshold not met yet, or the time-lock has not
+    /// expired — this records the approval and stops. That is the whole point of
+    /// the check: executing here on a proposal that cannot execute would fail
+    /// the transaction and roll the approval back with it.
+    pub fn approve_and_execute(env: Env, tx_id: u64, signer: Address) -> Result<(), Error> {
+        Self::approve(env.clone(), tx_id, signer.clone())?;
+
+        let p = Self::proposal(&env, tx_id)?;
+        let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
+        if p.approval_count < threshold {
+            return Ok(());
+        }
+        let policy = Self::policy_of(&env);
+        if policy.timelock_ledgers > 0
+            && env.ledger().sequence() < p.created_at.saturating_add(policy.timelock_ledgers)
+        {
+            return Ok(());
+        }
+        Self::run(env, tx_id, signer)
+    }
+
     pub fn approve_zk(env: Env, tx_id: u64, signer: Address, zk: ZKApproval) -> Result<(), Error> {
         Self::bump(&env);
         signer.require_auth();
@@ -653,8 +684,16 @@ impl VaultInstance {
     /// Every guard is re-checked here, not just at propose time: the owner may
     /// have tightened the policy while the proposal was collecting approvals.
     pub fn execute(env: Env, tx_id: u64, executor: Address) -> Result<(), Error> {
-        Self::bump(&env);
         executor.require_auth();
+        Self::run(env, tx_id, executor)
+    }
+
+    /// `execute` without the authorisation check, so `approve_and_execute` can
+    /// reach it. The host refuses a second `require_auth` for an address already
+    /// authorised in this frame — and the approval that precedes this one has
+    /// already made exactly that check against the same address.
+    fn run(env: Env, tx_id: u64, executor: Address) -> Result<(), Error> {
+        Self::bump(&env);
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
 

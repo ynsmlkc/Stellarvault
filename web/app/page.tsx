@@ -20,6 +20,7 @@ import {
   proposeTransaction,
   proposeBatch,
   approve as approveTx,
+  approveAndExecute,
   approveZk,
   approveZkAnon,
   execute as executeTx,
@@ -423,11 +424,32 @@ export default function Page() {
       return;
     }
     setBusy(`approve-${txId}`);
+
+    // Would this approval be the last one needed, with nothing in the way? Then
+    // settle it in the same transaction instead of leaving a fully-approved
+    // proposal waiting for somebody to press Execute.
+    //
+    // The blocker is checked here rather than left to the contract: the vault
+    // only declines to auto-settle for threshold and time-lock, so a guard that
+    // would reject the execution takes the whole transaction down — and the
+    // approval with it. Older vaults have no such entry point at all.
+    const st = statuses[txId];
+    const p = proposals.find((x) => x.id === txId);
+    const settles =
+      (version ?? 0) >= 6 &&
+      !!p &&
+      p.approval_count + 1 >= (config?.threshold ?? Infinity) &&
+      !executeBlocker({ ...p, approval_count: p.approval_count + 1 }, st, policy, balance);
+
     try {
-      await approveTx(vaultAddress, txId, w);
+      await (settles ? approveAndExecute : approveTx)(vaultAddress, txId, w);
       markApproved(vaultAddress, txId, w);
       refreshSoon();
-      showToast({ title: "Approval signed", sub: `Proposal #${txId} approved on-chain.`, tone: "ok" });
+      showToast(
+        settles
+          ? { title: "Approved and settled", sub: `Proposal #${txId} met its threshold and executed in the same transaction.`, tone: "ok" }
+          : { title: "Approval signed", sub: `Proposal #${txId} approved on-chain.`, tone: "ok" }
+      );
     } catch (e: any) {
       showToast({ title: "Approve failed", sub: cleanErr(e), tone: "err" });
     } finally {
@@ -1506,6 +1528,7 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
             {list.map((p) => {
               const shared = {
                 p, threshold, busy,
+                signerCount: config?.signer_count ?? signers.length,
                 st: statuses[p.id],
                 call: calls[p.id],
                 admin: admins[p.id],
@@ -1641,23 +1664,38 @@ function CancelButton({ id, busy, onCancel }: { id: number; busy: string | null;
   );
 }
 
-function ApprovalDots({ count, threshold, gold }: { count: number; threshold: number; gold?: boolean }) {
+/**
+ * Approvals against the threshold.
+ *
+ * It used to read "1 / 2 approved", which invites exactly the wrong reading:
+ * that the vault has two signers and one of them has answered. The threshold is
+ * how many are *needed*, not how many exist — a 2-of-3 vault has a third signer
+ * who has not been mentioned. So the number of signers is stated outright, and
+ * the count is labelled as a requirement rather than a fraction of the group.
+ */
+function ApprovalDots({ count, threshold, signers, gold }: { count: number; threshold: number; signers?: number; gold?: boolean }) {
+  const done = count >= threshold;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       {Array.from({ length: threshold }).map((_, i) => (
         <span key={i} style={{ width: 11, height: 11, borderRadius: "50%", background: i < count ? (gold ? "#C9A86A" : "#8A857B") : "transparent", border: i < count ? "none" : `1.5px solid ${gold ? "#5a564d" : "#46433c"}` }} />
       ))}
-      <span style={{ fontSize: 13, color: "#8A857B", marginLeft: 4 }}>{count} / {threshold} approved</span>
+      <span style={{ fontSize: 13, color: done ? "#C9A86A" : "#8A857B", marginLeft: 4 }}>
+        {done ? `${count} of ${threshold} — threshold met` : `${count} of ${threshold} approvals needed`}
+      </span>
+      {!!signers && (
+        <span style={{ fontSize: 12, color: "#5a564d" }}>· {signers} signer{signers === 1 ? "" : "s"}</span>
+      )}
     </div>
   );
 }
 
 type TxCardProps = {
-  p: Proposal; threshold: number; busy: string | null; iApproved: boolean;
+  p: Proposal; threshold: number; signerCount: number; busy: string | null; iApproved: boolean;
   st?: ProposalStatus; call?: CallSpec; admin?: AdminAction; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
 };
 
-function TransparentTx({ p, threshold, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1689,7 +1727,7 @@ function TransparentTx({ p, threshold, busy, iApproved, st, call, admin, blocker
           ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
           : cancelled
             ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
-            : <ApprovalDots count={p.approval_count} threshold={threshold} gold />}
+            : <ApprovalDots count={p.approval_count} threshold={threshold} signers={signerCount} gold />}
         {!closed && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {ready && blocker && <BlockedNote reason={blocker} />}
@@ -1698,7 +1736,7 @@ function TransparentTx({ p, threshold, busy, iApproved, st, call, admin, blocker
               ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-goldbtn" title={blocker ?? undefined} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: busy || blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
               : iApproved
                 ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
-                : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : "Approve"}</button>}
+                : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : p.approval_count + 1 >= threshold ? "Approve & settle" : "Approve"}</button>}
           </div>
         )}
       </div>
@@ -1719,7 +1757,7 @@ function BatchBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
-function PrivateTx({ p, threshold, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1752,7 +1790,7 @@ function PrivateTx({ p, threshold, busy, iApproved, st, call, admin, blocker, ca
           ? <span style={{ fontSize: 12, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 executed · the chain never learned who approved</span>
           : cancelled
             ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
-            : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count}/{threshold} — voter identities hidden</span>}
+            : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count} of {threshold} approvals needed, from {signerCount} hidden signer{signerCount === 1 ? "" : "s"}</span>}
         {!closed && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {ready && blocker && <BlockedNote reason={blocker} />}
@@ -2044,10 +2082,11 @@ const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hou
  * code and the Guards screen says so — which only works if this number moves
  * with the contract's `VERSION`.
  *
- * 5 is the first build where governance needs the threshold: below it, the
- * owner alone can change the signer set, clear the guards or swap the code.
+ * Below v5 the owner alone can change the signer set, clear the guards or swap
+ * the code; below v6 a proposal at its threshold still needs a separate
+ * Execute.
  */
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 6;
 
 function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;

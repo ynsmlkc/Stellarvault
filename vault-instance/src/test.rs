@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 5);
+    assert_eq!(s.vault.version(), 6);
 }
 
 #[test]
@@ -1243,4 +1243,70 @@ fn test_new_owner_can_administer() {
     s.admin(AdminAction::AllowRecipient(target.clone()));
     assert_eq!(s.vault.get_allowed().len(), 1);
     assert_eq!(s.vault.get_config().owner, next, "and it did not drift back");
+}
+
+/* ================= approve-and-settle ================= */
+
+/// The last approver settles it, so nobody has to come back and press execute.
+#[test]
+fn test_the_final_approval_settles_the_proposal() {
+    let s = setup(2);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &400, &false);
+
+    s.vault.approve_and_execute(&tx, &s.signer(0));
+    assert!(!s.vault.get_proposal(&tx).executed, "one short — approved only");
+    assert_eq!(s.token.balance(&to), 0);
+
+    s.vault.approve_and_execute(&tx, &s.signer(1));
+    assert!(s.vault.get_proposal(&tx).executed, "threshold met — settled in the same call");
+    assert_eq!(s.token.balance(&to), 400);
+}
+
+/// A time-locked proposal must record the approval and stop. Executing here
+/// would fail the transaction and take the approval down with it — the approver
+/// would have signed for nothing.
+#[test]
+fn test_the_final_approval_waits_out_the_timelock() {
+    let s = setup(2);
+    s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &400, &false);
+
+    s.vault.approve_and_execute(&tx, &s.signer(0));
+    s.vault.approve_and_execute(&tx, &s.signer(1));
+
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 2, "both approvals kept");
+    assert!(!s.vault.get_proposal(&tx).executed);
+    assert_eq!(s.token.balance(&to), 0);
+
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 11);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&to), 400);
+}
+
+/// Approving twice is still refused — settling in the same call does not open a
+/// second door into the approval counter.
+#[test]
+fn test_approve_and_execute_still_refuses_a_double_approval() {
+    let s = setup(3);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    s.vault.approve_and_execute(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_approve_and_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::AlreadyApproved))
+    );
+}
+
+/// Rule changes settle the same way.
+#[test]
+fn test_the_final_approval_settles_a_rule_change() {
+    let s = setup(2);
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::SetThreshold(3));
+    s.vault.approve_and_execute(&tx, &s.signer(0));
+    assert_eq!(s.vault.get_config().threshold, 2, "one short");
+    s.vault.approve_and_execute(&tx, &s.signer(1));
+    assert_eq!(s.vault.get_config().threshold, 3);
 }
