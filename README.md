@@ -198,7 +198,13 @@ to. Taken alone that would make the feature close to useless for a treasury:
 you cannot ask every contractor, grantee and supplier to onboard before you can
 pay them.
 
-So an unregistered recipient gets paid by `withdraw` instead: ordinary XLM
+There is no way around it, and it is not a limitation of this app: an
+unregistered address cannot receive value on the confidential side by any route.
+`confidential_transfer` has no key to encrypt to, and even `deposit` — which
+carries no proof — is refused with `Error(Contract, #3501)`. So "pay them now,
+let them claim it later" is not available either.
+
+Given that, an unregistered recipient gets paid by `withdraw` instead: ordinary XLM
 leaves the hidden balance and lands in their account, and they need to know
 nothing about any of this. That payment's amount is public, because it exits as
 a normal SEP-41 transfer. The vault's remaining balance stays hidden.
