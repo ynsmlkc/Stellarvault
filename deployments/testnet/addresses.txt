@@ -232,3 +232,23 @@ transaction that rolls their own approval back.
 Verified live on the test vault above:
   approve_and_execute #1 of 2 -> executed = false
   approve_and_execute #2 of 2 -> executed = true, 1 XLM moved, no separate Execute
+
+--- 2026-08-09 · vault-instance v7 (a signer change retires open proposals) ---
+wasm hash    060f00c8f5d27c765de156e7398fbf9da8ea3c025588684f3bea34dfc80dff6b
+test vault   CDMHFDPIOAXXWNYJMOUBVK5MLOKOCNGDWP5YMS7HY37YMAPRTYB2HKDD  (2-of-3)
+
+`approval_count` is a plain counter, so an approval given before a signer left
+kept counting after: a 2-of-3 vault could execute on one current signer plus the
+departed one's vote. An instance-level epoch, bumped by AddSigner/RemoveSigner
+and recorded on each proposal, retires them instead.
+
+Recounting approvals against the current signer list was measured and rejected:
+it is affordable (485k -> 548k CPU at 3 signers, 501k -> 932k at 16, against a
+100M limit) but an anonymous approval records a nullifier and no address, so
+there is nothing to recount it against. It broke the ZK path outright.
+
+Verified live on the test vault above:
+  propose payment #0, deployer approves            -> 1 of 2
+  propose+pass RemoveSigner(deployer)
+  signer1 approves payment #0                      -> Error(Contract, #32)
+                                                      balance unchanged

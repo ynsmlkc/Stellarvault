@@ -49,6 +49,9 @@ const CALLOWED: Symbol = symbol_short!("callowed");
 const VERIFIER: Symbol = symbol_short!("verifier");
 /// Shuffled signer commitments — the Merkle leaves a prover needs.
 const COMMITS: Symbol = symbol_short!("commits");
+/// Bumped whenever the signer set changes. A proposal records the value it was
+/// created under; approvals gathered from a different set no longer count.
+const EPOCH: Symbol = symbol_short!("epoch");
 
 /// Contract code version, so the dashboard can tell what a vault can do:
 ///   1 — pre-guards (no `version` entry point at all)
@@ -57,7 +60,8 @@ const COMMITS: Symbol = symbol_short!("commits");
 ///   4 — signature-derived signer keys + anonymous (unauthenticated) approval
 ///   5 — governance by proposal: no owner-only path to any rule change
 ///   6 — the final approval can settle the proposal in the same transaction
-const VERSION: u32 = 6;
+///   7 — a signer-set change retires the proposals it would have decided
+const VERSION: u32 = 7;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -125,6 +129,10 @@ pub enum Error {
     // --- ownership ---
     /// `transfer_ownership` was called with the address that already owns it.
     SameOwner = 31,
+    // --- signer set changes ---
+    /// The signer set changed after this proposal was made, so the approvals it
+    /// holds were given by a different group. It has to be proposed again.
+    SignerSetChanged = 32,
 }
 
 #[contracttype]
@@ -146,6 +154,8 @@ pub enum DataKey {
     CallAuth(u64),
     /// The configuration change a proposal applies, when it is an admin action.
     Admin(u64),
+    /// The signer-set epoch a proposal was created under.
+    Epoch(u64),
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -326,6 +336,13 @@ pub struct ExecutedEvent {
 pub struct CancelledEvent {
     #[topic] pub tx_id: u64,
     pub cancelled_by: Address,
+}
+
+/// The signer set changed; every proposal made before this is retired.
+#[contractevent]
+#[derive(Clone)]
+pub struct SignerSetChangedEvent {
+    #[topic] pub epoch: u32,
 }
 
 #[contractevent]
@@ -562,6 +579,7 @@ impl VaultInstance {
         Self::require_signer(&env, &signer)?;
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
+        Self::require_current_set(&env, tx_id)?;
         if env.storage().persistent().has(&DataKey::Approval(tx_id, signer.clone())) {
             return Err(Error::AlreadyApproved);
         }
@@ -616,6 +634,7 @@ impl VaultInstance {
         Self::require_signer(&env, &signer)?;
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
+        Self::require_current_set(&env, tx_id)?;
         let nk = DataKey::Nullifier(zk.nullifier.clone());
         if env.storage().persistent().has(&nk) {
             return Err(Error::NullifierUsed); // double-vote
@@ -657,6 +676,7 @@ impl VaultInstance {
         }
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
+        Self::require_current_set(&env, tx_id)?;
 
         let nk = DataKey::Nullifier(zk.nullifier.clone());
         if env.storage().persistent().has(&nk) {
@@ -696,6 +716,7 @@ impl VaultInstance {
         Self::bump(&env);
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
+        Self::require_current_set(&env, tx_id)?;
 
         let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
         if p.approval_count < threshold {
@@ -955,6 +976,48 @@ impl VaultInstance {
     }
 
     /// A proposal may still be acted on: neither executed nor cancelled.
+    /// Retire every proposal made under the outgoing signer set.
+    ///
+    /// One counter, not a sweep: the proposals are not touched, they simply stop
+    /// matching. A vault with a thousand proposals costs the same as one with
+    /// three, and the proposal that made this change is itself retired — which
+    /// is correct, since it has already been applied.
+    fn retire_open_proposals(env: &Env) {
+        let next = Self::epoch(env) + 1;
+        env.storage().instance().set(&EPOCH, &next);
+        SignerSetChangedEvent { epoch: next }.publish(env);
+    }
+
+    fn epoch(env: &Env) -> u32 {
+        env.storage().instance().get(&EPOCH).unwrap_or(0)
+    }
+
+    /// Refuse a proposal whose approvals were gathered under a different signer
+    /// set.
+    ///
+    /// The counter is a plain `u32` because the alternative — recounting the
+    /// approvals against the current signers at execution — cannot work here.
+    /// An anonymous approval records a nullifier and no address, by design, so
+    /// there is nothing to recount it against; asking who gave it is the exact
+    /// question `approve_zk_anon` exists to refuse. One comparison covers both
+    /// kinds of approval and costs a single read.
+    ///
+    /// Retired rather than re-approvable, for the same reason: an anonymous
+    /// approver has already burned their nullifier for this `tx_id` and could
+    /// not approve it a second time. A fresh proposal gets a fresh id, and with
+    /// it fresh nullifiers.
+    fn require_current_set(env: &Env, tx_id: u64) -> Result<(), Error> {
+        let made_under: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Epoch(tx_id))
+            .unwrap_or(0); // pre-v7 proposals predate the counter and keep working
+        if made_under != Self::epoch(env) {
+            return Err(Error::SignerSetChanged);
+        }
+        Ok(())
+    }
+
     fn require_open(env: &Env, tx_id: u64, p: &Proposal) -> Result<(), Error> {
         if p.executed {
             return Err(Error::AlreadyExecuted);
@@ -984,8 +1047,10 @@ impl VaultInstance {
             created_at: env.ledger().sequence(),
         };
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+        env.storage().persistent().set(&DataKey::Epoch(tx_id), &Self::epoch(env));
         Self::bump(&env);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
+        Self::bump_key(&env, &DataKey::Epoch(tx_id));
         env.storage().instance().set(&NEXTTX, &(tx_id + 1));
 
         ProposedEvent { tx_id, proposer, target, amount, private_mode }.publish(env);
@@ -1076,6 +1141,7 @@ impl VaultInstance {
                 let mut signers: Vec<Address> = s.get(&SIGNERS).unwrap();
                 signers.push_back(a.clone());
                 s.set(&SIGNERS, &signers);
+                Self::retire_open_proposals(env);
             }
             AdminAction::RemoveSigner(a) => {
                 let mut next = Vec::new(env);
@@ -1085,6 +1151,7 @@ impl VaultInstance {
                     }
                 }
                 s.set(&SIGNERS, &next);
+                Self::retire_open_proposals(env);
             }
             AdminAction::SetPolicy(p) => {
                 s.set(&POLICY, p);

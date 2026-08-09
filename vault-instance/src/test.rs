@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 6);
+    assert_eq!(s.vault.version(), 7);
 }
 
 #[test]
@@ -1166,18 +1166,18 @@ fn test_a_rule_change_respects_the_timelock() {
 #[test]
 fn test_a_rule_change_is_rechecked_at_execution() {
     let s = setup(1);
+    let next = Address::generate(&s.env);
 
-    // legal at proposal time: signer(2) is a signer
-    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::RemoveSigner(s.signer(2)));
+    // legal at proposal time: `next` is not the owner
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::TransferOwnership(next.clone()));
     s.vault.approve(&tx, &s.signer(0));
 
-    // meanwhile a second proposal removes them first
-    s.admin(AdminAction::RemoveSigner(s.signer(2)));
-    assert!(!s.vault.is_signer(&s.signer(2)));
+    // meanwhile a second proposal hands it over first
+    s.admin(AdminAction::TransferOwnership(next.clone()));
+    assert_eq!(s.vault.get_config().owner, next);
 
     // the first is now stale, and says so rather than quietly doing nothing
-    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::SignerNotFound)));
-    assert_eq!(s.vault.get_config().signer_count, 2, "and nothing else moved");
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::SameOwner)));
 }
 
 /// An admin proposal moves no funds, so the amount guards must not apply to it —
@@ -1208,6 +1208,101 @@ fn test_raising_the_threshold_holds_back_already_approved_proposals() {
     s.vault.approve(&tx, &s.signer(2));
     s.token_admin.mint(&s.vault_addr, &1_000);
     s.vault.execute(&tx, &s.signer(0));
+}
+
+/* ================= signer-set changes ================= */
+
+/// The reason this exists: `approval_count` is a plain counter, so an approval
+/// given before a signer was removed went on counting afterwards — a 2-of-3
+/// vault could execute on one current signer plus the departed one's vote. The
+/// people who removed them inherited their say.
+#[test]
+fn test_removing_a_signer_retires_the_proposals_they_voted_on() {
+    let s = setup(2);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(1), &to, &400, &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    s.admin(AdminAction::RemoveSigner(s.signer(0)));
+
+    // one remaining signer approves — which used to be enough, with the
+    // departed signer's approval making up the threshold
+    assert_eq!(
+        s.vault.try_approve_and_execute(&tx, &s.signer(1)),
+        Err(Ok(Error::SignerSetChanged))
+    );
+    assert_eq!(s.token.balance(&to), 0, "nothing may move on a retired proposal");
+    assert!(!s.vault.get_proposal(&tx).executed);
+}
+
+/// The approval itself is refused, not just the execution — approving a dead
+/// proposal wastes a signature, and in private mode it would burn a nullifier
+/// that can never be spent again.
+#[test]
+fn test_a_retired_proposal_cannot_be_approved() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(1), &Address::generate(&s.env), &400, &false);
+    s.admin(AdminAction::AddSigner(Address::generate(&s.env)));
+
+    assert_eq!(s.vault.try_approve(&tx, &s.signer(0)), Err(Ok(Error::SignerSetChanged)));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::SignerSetChanged)));
+}
+
+/// Adding a signer retires them too. The threshold is unchanged, so the same
+/// approvals would otherwise carry a proposal that a larger group now decides.
+#[test]
+fn test_adding_a_signer_also_retires() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &400, &false);
+    s.admin(AdminAction::AddSigner(Address::generate(&s.env)));
+    assert_eq!(s.vault.try_approve_and_execute(&tx, &s.signer(0)), Err(Ok(Error::SignerSetChanged)));
+    assert_eq!(s.token.balance(&to), 0);
+}
+
+/// Proposing it again is the way forward, and works immediately — a fresh id,
+/// under the new set, with fresh nullifiers for anyone approving privately.
+#[test]
+fn test_re_proposing_after_a_signer_change_works() {
+    let s = setup(2);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let dead = s.vault.propose(&s.signer(0), &to, &400, &false);
+    s.admin(AdminAction::RemoveSigner(s.signer(2)));
+    assert_eq!(s.vault.try_approve(&dead, &s.signer(0)), Err(Ok(Error::SignerSetChanged)));
+
+    let fresh = s.vault.propose(&s.signer(0), &to, &400, &false);
+    s.vault.approve(&fresh, &s.signer(0));
+    s.vault.approve_and_execute(&fresh, &s.signer(1));
+    assert_eq!(s.token.balance(&to), 400);
+}
+
+/// A retired proposal can still be tidied away — cancelling is how it leaves
+/// the pending list, so it must not be blocked by the thing that retired it.
+#[test]
+fn test_a_retired_proposal_can_still_be_cancelled() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &400, &false);
+    s.admin(AdminAction::RemoveSigner(s.signer(2)));
+    s.vault.cancel(&tx, &s.signer(0));
+    assert!(s.vault.is_cancelled(&tx));
+}
+
+/// Changing the threshold does not retire anything: the same people decide, the
+/// bar just moved. Raising it holds proposals back until they clear the new one.
+#[test]
+fn test_a_threshold_change_does_not_retire() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &400, &false);
+    s.admin(AdminAction::SetThreshold(2));
+
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve_and_execute(&tx, &s.signer(1));
+    assert_eq!(s.token.balance(&to), 400, "still alive, just needed the second approval");
 }
 
 /* ================= ownership ================= */
@@ -1310,3 +1405,6 @@ fn test_the_final_approval_settles_a_rule_change() {
     s.vault.approve_and_execute(&tx, &s.signer(1));
     assert_eq!(s.vault.get_config().threshold, 3);
 }
+
+
+

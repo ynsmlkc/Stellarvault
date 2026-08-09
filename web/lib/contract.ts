@@ -154,6 +154,7 @@ const VAULT_ERRORS: Record<number, string> = {
   29: "The call allowlist is full (50 max).",
   30: "Turn on on-chain verification before approving anonymously.",
   31: "That address already owns this vault.",
+  32: "The signer set changed after this was proposed — propose it again.",
 };
 
 /**

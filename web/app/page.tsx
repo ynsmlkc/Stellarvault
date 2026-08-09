@@ -576,6 +576,19 @@ export default function Page() {
     }
   };
 
+  /**
+   * Add or remove a signer.
+   *
+   * Both retire every proposal currently open — the approvals on them were
+   * given by a different group — so the warning is part of the flow rather than
+   * a footnote.
+   */
+  const doAddSigner = (signer: string) =>
+    proposeRule({ kind: "AddSigner", signer }, `signer-${signer}`, "They would become a signer");
+
+  const doRemoveSigner = (signer: string) =>
+    proposeRule({ kind: "RemoveSigner", signer }, `signer-${signer}`, "They would stop being a signer");
+
   const doAllowContract = (contract: string, allow: boolean) =>
     proposeRule(
       allow ? { kind: "AllowContract", contract } : { kind: "RevokeContract", contract },
@@ -710,7 +723,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} admins={admins}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -978,6 +991,7 @@ type ShellProps = {
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
+  onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void;
   onToast: (t: ToastMsg) => void;
   version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
@@ -1026,7 +1040,7 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
@@ -1454,9 +1468,10 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
+  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1548,13 +1563,17 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
         </div>
 
         <div style={{ position: "sticky", top: 96, display: "flex", flexDirection: "column", gap: 18 }}>
-          <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 16 }}>Signers</div>
-            {(signers.length ? signers : ["", "", ""]).map((s, i) => (
-              <SignerRow key={i} letter={letterFor(i)} grad={GRADS[i % 3]} addr={s ? shortAddr(s, 6, 4) : "…"} owner={i === 0} you={!!wallet && s === wallet} />
-            ))}
-            <button className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 9, width: "100%", borderRadius: 9, cursor: "pointer", marginTop: 6 }}>+ Add signer</button>
-          </div>
+          <SignersCard
+            signers={signers}
+            ownerAddr={config?.owner ?? null}
+            wallet={wallet}
+            threshold={threshold}
+            busy={busy}
+            pendingCount={pendingCount}
+            canPropose={!!wallet && signers.includes(wallet)}
+            onAdd={onAddSigner}
+            onRemove={onRemoveSigner}
+          />
           <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <span style={{ fontWeight: 600, fontSize: 14 }}>Guards</span>
@@ -1602,17 +1621,123 @@ function Skeleton() {
 function Empty({ label }: { label: string }) {
   return <div style={{ border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 14, background: "transparent", padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>{label}</div>;
 }
-function SignerRow({ letter, grad, addr, owner, you }: { letter: string; grad: string; addr: string; owner?: boolean; you?: boolean }) {
+/**
+ * Who signs, and how that changes.
+ *
+ * The card used to be a list with a decorative "+ Add signer" that had no
+ * handler, and no way to remove anyone at all — the contract had both, and
+ * nothing reached them.
+ *
+ * Every change here retires the proposals that are currently open: the
+ * approvals on them were given by a different group, and a departing signer's
+ * vote must not carry a decision made after they left. That is a real cost when
+ * work is in flight, so it is stated before the click, not after.
+ */
+function SignersCard({ signers, ownerAddr, wallet, threshold, busy, pendingCount, canPropose, onAdd, onRemove }: {
+  signers: string[]; ownerAddr: string | null; wallet: string | null; threshold: number;
+  busy: string | null; pendingCount: number; canPropose: boolean;
+  onAdd: (s: string) => void; onRemove: (s: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const valid = /^G[A-Z2-7]{55}$/.test(draft.trim());
+  const already = signers.includes(draft.trim());
+  // Removing below the threshold is refused on-chain; saying so here saves a
+  // proposal that could only ever fail.
+  const canRemove = signers.length > threshold;
+
+  return (
+    <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>Signers</span>
+        <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>{threshold} of {signers.length} to pass</span>
+      </div>
+
+      {(signers.length ? signers : ["", "", ""]).map((sg, i) => (
+        <SignerRow
+          key={sg || i}
+          letter={letterFor(i)}
+          grad={GRADS[i % 3]}
+          addr={sg ? shortAddr(sg, 6, 4) : "…"}
+          owner={!!sg && sg === ownerAddr}
+          you={!!wallet && sg === wallet}
+          onRemove={canPropose && sg && canRemove ? () => onRemove(sg) : undefined}
+          busy={busy === `signer-${sg}`}
+        />
+      ))}
+
+      {!canRemove && signers.length > 0 && (
+        <div style={{ fontSize: 11, color: "#5a564d", marginTop: 8, lineHeight: 1.5 }}>
+          Nobody can be removed at {threshold} of {signers.length} — lower the threshold first.
+        </div>
+      )}
+
+      {canPropose && (
+        adding ? (
+          <div style={{ marginTop: 12 }}>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="G… address"
+              autoFocus
+              style={{ width: "100%", background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: 8, padding: "9px 11px", color: "#ECE7DD", fontFamily: MONO, fontSize: 11.5, outline: "none", marginBottom: 8 }}
+            />
+            {!!draft.trim() && !valid && <div style={{ fontSize: 11, color: "#C45D4A", marginBottom: 8 }}>That is not a Stellar account address.</div>}
+            {already && <div style={{ fontSize: 11, color: "#C45D4A", marginBottom: 8 }}>Already a signer here.</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => { onAdd(draft.trim()); setDraft(""); setAdding(false); }}
+                disabled={!valid || already || !!busy}
+                style={{ flex: 1, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "8px 12px", fontFamily: SANS, fontWeight: 600, fontSize: 12.5, cursor: valid && !already ? "pointer" : "not-allowed", opacity: valid && !already ? 1 : 0.45 }}
+              >
+                Propose
+              </button>
+              <button onClick={() => { setAdding(false); setDraft(""); }} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: 8, padding: "8px 12px", fontFamily: SANS, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAdding(true)} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 9, width: "100%", borderRadius: 9, cursor: "pointer", marginTop: 10 }}>+ Add signer</button>
+        )
+      )}
+
+      {canPropose && (
+        <div style={{ fontSize: 11, color: "#5a564d", marginTop: 10, lineHeight: 1.55 }}>
+          Adding or removing needs {threshold} approvals like any payment
+          {pendingCount > 0 && (
+            <>, and <b style={{ color: "#C9A86A" }}>retires the {pendingCount} open proposal{pendingCount === 1 ? "" : "s"}</b> — their approvals came from a different group, so they have to be proposed again</>
+          )}.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignerRow({ letter, grad, addr, owner, you, onRemove, busy }: { letter: string; grad: string; addr: string; owner?: boolean; you?: boolean; onRemove?: () => void; busy?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: "1px solid rgba(236,231,221,0.05)" }}>
       <Avatar letter={letter} grad={grad} size={28} />
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, color: "#ECE7DD", display: "flex", alignItems: "center", gap: 7 }}>Signer {letter}
-          {owner && <span style={{ fontSize: 10, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: 5, padding: "1px 6px" }}>owner</span>}
+          {/* "creator", not "owner": since v5 the role gates nothing in the
+              vault — it is the key the factory files this vault under. Calling
+              it owner implied an authority that no longer exists. */}
+          {owner && <span style={{ fontSize: 10, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: 5, padding: "1px 6px" }}>creator</span>}
           {you && <span style={{ fontSize: 10, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 5, padding: "1px 6px" }}>you</span>}
         </div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>{addr}</div>
       </div>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          disabled={busy}
+          title="Propose removing this signer"
+          className="h-navtext"
+          style={{ background: "transparent", border: "none", color: "#5a564d", fontFamily: SANS, fontSize: 16, lineHeight: 1, cursor: busy ? "wait" : "pointer", padding: "2px 4px" }}
+        >
+          {busy ? "…" : "×"}
+        </button>
+      )}
     </div>
   );
 }
@@ -2084,9 +2209,9 @@ const TIMELOCK_PRESETS: [string, number][] = [["Off", 0], ["5 min", 60], ["1 hou
  *
  * Below v5 the owner alone can change the signer set, clear the guards or swap
  * the code; below v6 a proposal at its threshold still needs a separate
- * Execute.
+ * Execute; below v7 an approval keeps counting after its signer is removed.
  */
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, allowedContracts, version, onUpgrade, onSave, onAllowRecipient, onRegisterKey, onPublishSignerSet, myLeaf, commitments, onAllowContract }: {
   go: (s: Screen) => void; wallet: string | null; config: VaultConfig | null;

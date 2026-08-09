@@ -19,9 +19,9 @@ describe("describeError", () => {
   // The map and the contract's error enum have drifted apart before — an entry
   // described a variant the contract never had, so a real error read as the
   // wrong explanation. This pins the two ends that are easy to get wrong.
-  it("covers exactly codes 1..31, the contract's enum", () => {
-    expect(describeError(new Error("Error(Contract, #31)"))).toMatch(/already owns/);
-    expect(describeError(new Error("Error(Contract, #32)"))).toMatch(/code 32/);
+  it("covers exactly codes 1..32, the contract's enum", () => {
+    expect(describeError(new Error("Error(Contract, #32)"))).toMatch(/signer set changed/i);
+    expect(describeError(new Error("Error(Contract, #33)"))).toMatch(/code 33/);
   });
 });
 
