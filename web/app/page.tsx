@@ -40,6 +40,7 @@ import {
   getAdmin,
   getFactoryWasm,
   upgradeVaultDirect,
+  getRetiredBefore,
   describeAdmin,
   describeError,
   OPEN_POLICY,
@@ -181,6 +182,7 @@ export default function Page() {
   const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
   const [admins, setAdmins] = useState<Record<number, AdminAction>>({});
+  const [retiredBefore, setRetiredBefore] = useState(0);
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
@@ -220,6 +222,8 @@ export default function Page() {
 
       // which proposals are contract calls, and which change the vault's own
       // rules — both look like zero-amount transfers to self in `Proposal`
+      setRetiredBefore(await getRetiredBefore(addr));
+
       const [cs, ad] = await Promise.all([
         Promise.all(p.map((x) => getCall(addr, x.id))),
         Promise.all(p.map((x) => getAdmin(addr, x.id))),
@@ -756,7 +760,7 @@ export default function Page() {
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
           policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} admins={admins}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
-          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
+          onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} retiredBefore={retiredBefore} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
       {proof && <ProofOverlay stage={proofStage} />}
       {toast && <Toast msg={toast} />}
@@ -1024,7 +1028,7 @@ type ShellProps = {
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
-  onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void;
+  onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void; retiredBefore: number;
   onToast: (t: ToastMsg) => void;
   version: number | null; onUpgrade: () => void;
   onSavePolicy: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
@@ -1073,7 +1077,7 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail version={p.version} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail version={p.version} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
@@ -1501,16 +1505,20 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, retiredBefore, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
   policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
-  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null;
+  onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null; retiredBefore: number;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
   const signers = config?.signers ?? [];
-  // a cancelled proposal is neither pending nor a settled payment — it belongs in history
-  const isDone = (p: Proposal) => p.executed || !!statuses[p.id]?.cancelled;
+  // Neither a cancelled nor a retired proposal is pending: one was withdrawn,
+  // the other can never execute whatever anyone does. Both belong in history —
+  // leaving a retired proposal in the pending list, forever, with nobody able
+  // to approve it, is exactly what looked broken.
+  const isRetired = (p: Proposal) => !p.executed && p.id < retiredBefore;
+  const isDone = (p: Proposal) => p.executed || !!statuses[p.id]?.cancelled || isRetired(p);
   const pending = proposals.filter((p) => !isDone(p));
   const history = proposals.filter(isDone);
   const [tab, setTab] = useState<"pending" | "history">("pending");
@@ -1600,11 +1608,18 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, go, v
                 st: statuses[p.id],
                 call: calls[p.id],
                 admin: admins[p.id],
+                retired: isRetired(p),
                 blocker: executeBlocker(p, statuses[p.id], policy, balance),
-                // proposer only: the owner's veto went with their other unilateral
-                // powers — one key must not be able to kill the proposal that
-                // takes those powers away
-                canCancel: !!wallet && wallet === p.proposer,
+                // Proposer only while it is live: the owner's veto went with
+                // their other unilateral powers, and one key must not be able
+                // to kill the proposal that takes those powers away.
+                //
+                // Once retired, any signer can clear it — it cannot execute
+                // whatever anyone does, and the proposer is very often the
+                // person who was just removed.
+                canCancel:
+                  !!wallet &&
+                  (wallet === p.proposer || (isRetired(p) && signers.includes(wallet))),
                 onCancel,
                 iApproved: didApprove(vaultAddress, p.id, wallet),
               };
@@ -1834,10 +1849,10 @@ function BlockedNote({ reason }: { reason: string }) {
   );
 }
 
-function CancelButton({ id, busy, onCancel }: { id: number; busy: string | null; onCancel: (id: number) => void }) {
+function CancelButton({ id, busy, onCancel, label = "Cancel" }: { id: number; busy: string | null; onCancel: (id: number) => void; label?: string }) {
   return (
     <button onClick={() => onCancel(id)} disabled={!!busy} className="h-navtext" style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
-      {busy === `cancel-${id}` ? "Cancelling…" : "Cancel"}
+      {busy === `cancel-${id}` ? "…" : label}
     </button>
   );
 }
@@ -1870,13 +1885,13 @@ function ApprovalDots({ count, threshold, signers, gold }: { count: number; thre
 
 type TxCardProps = {
   p: Proposal; threshold: number; signerCount: number; busy: string | null; iApproved: boolean;
-  st?: ProposalStatus; call?: CallSpec; admin?: AdminAction; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
+  st?: ProposalStatus; call?: CallSpec; admin?: AdminAction; retired?: boolean; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
 };
 
-function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, retired, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
-  const closed = p.executed || cancelled;
+  const closed = p.executed || cancelled || !!retired;
   return (
     <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#C9A86A" }} />
@@ -1905,11 +1920,16 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, a
           ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
           : cancelled
             ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
-            : <ApprovalDots count={p.approval_count} threshold={threshold} signers={signerCount} gold />}
+            : retired
+              ? <RetiredNote count={p.approval_count} />
+              : <ApprovalDots count={p.approval_count} threshold={threshold} signers={signerCount} gold />}
+        {retired && canCancel && (
+          <CancelButton id={p.id} busy={busy} onCancel={onCancel} label="Clear it" />
+        )}
         {!closed && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {ready && blocker && <BlockedNote reason={blocker} />}
-            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} />}
+            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} label={retired ? "Clear" : "Cancel"} />}
             {ready
               ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-goldbtn" title={blocker ?? undefined} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: busy || blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
               : iApproved
@@ -1919,6 +1939,22 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, a
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Says why a proposal stopped, in the place the approval count used to be.
+ *
+ * "Signer set changed" rather than an error code, because from the outside this
+ * looks like the vault refusing a perfectly good proposal — and the way out is
+ * to make it again, which is worth saying rather than leaving to be guessed.
+ */
+function RetiredNote({ count }: { count: number }) {
+  return (
+    <span style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>
+      ⃠ Retired — the signer set changed after this was proposed
+      {count > 0 && <>, so its {count} approval{count === 1 ? "" : "s"} came from a different group</>}. Propose it again.
+    </span>
   );
 }
 
@@ -1935,10 +1971,10 @@ function BatchBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
-function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, retired, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
-  const closed = p.executed || cancelled;
+  const closed = p.executed || cancelled || !!retired;
   return (
     <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: closed ? 0.8 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
@@ -1968,11 +2004,16 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin
           ? <span style={{ fontSize: 12, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 executed · the chain never learned who approved</span>
           : cancelled
             ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
-            : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count} of {threshold} approvals needed, from {signerCount} hidden signer{signerCount === 1 ? "" : "s"}</span>}
+            : retired
+              ? <RetiredNote count={p.approval_count} />
+              : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count} of {threshold} approvals needed, from {signerCount} hidden signer{signerCount === 1 ? "" : "s"}</span>}
+        {retired && canCancel && (
+          <CancelButton id={p.id} busy={busy} onCancel={onCancel} label="Clear it" />
+        )}
         {!closed && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {ready && blocker && <BlockedNote reason={blocker} />}
-            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} />}
+            {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} label={retired ? "Clear" : "Cancel"} />}
             {ready
               ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-ghost" title={blocker ?? undefined} style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
               : iApproved

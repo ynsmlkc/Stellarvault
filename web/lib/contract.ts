@@ -277,6 +277,21 @@ export async function getBatch(vaultAddr: string, txId: number): Promise<BatchIt
  * Contract code version: 2 = guards available, null = a vault deployed before
  * guards existed (it has no `version` entry point) and needs `upgrade()`.
  */
+/**
+ * Proposals with an id below this were retired by a signer-set change.
+ *
+ * One number for the whole vault rather than a call per proposal — a retired
+ * proposal cannot be approved or executed by anyone, so it is not pending, and
+ * leaving it in the pending list forever was the thing worth fixing.
+ */
+export async function getRetiredBefore(vaultAddr: string): Promise<number> {
+  try {
+    return Number(await simulate(vaultAddr, "retired_before", []));
+  } catch {
+    return 0; // pre-v8 vault: nothing is retired as far as it knows
+  }
+}
+
 export async function getVersion(vaultAddr: string): Promise<number | null> {
   try {
     return Number(await simulate(vaultAddr, "version", []));

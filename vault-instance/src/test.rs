@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 7);
+    assert_eq!(s.vault.version(), 8);
 }
 
 #[test]
@@ -1303,6 +1303,58 @@ fn test_a_threshold_change_does_not_retire() {
     s.vault.approve(&tx, &s.signer(0));
     s.vault.approve_and_execute(&tx, &s.signer(1));
     assert_eq!(s.token.balance(&to), 400, "still alive, just needed the second approval");
+}
+
+/// A retired proposal must be clearable by whoever is still here. The proposer
+/// is very often the person who was just removed, and before this it could sit
+/// in the pending list forever with nobody able to touch it.
+#[test]
+fn test_any_signer_can_clear_a_retired_proposal() {
+    let s = setup(2);
+    // proposed by the signer who is about to be removed
+    let tx = s.vault.propose(&s.signer(2), &Address::generate(&s.env), &400, &false);
+    s.admin(AdminAction::RemoveSigner(s.signer(2)));
+
+    assert!(tx < s.vault.retired_before(), "retired by the removal");
+    s.vault.cancel(&tx, &s.signer(1)); // a different, current signer
+    assert!(s.vault.is_cancelled(&tx));
+}
+
+/// Clearing is not a veto. A LIVE proposal is still the proposer's alone —
+/// otherwise any signer could kill any proposal they disliked.
+#[test]
+fn test_a_live_proposal_is_still_the_proposers_to_cancel() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(2), &Address::generate(&s.env), &400, &false);
+    assert_eq!(s.vault.try_cancel(&tx, &s.signer(1)), Err(Ok(Error::NotProposer)));
+}
+
+/// And a stranger cannot clear even a retired one.
+#[test]
+fn test_a_stranger_cannot_clear_a_retired_proposal() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &400, &false);
+    s.admin(AdminAction::RemoveSigner(s.signer(2)));
+    assert_eq!(
+        s.vault.try_cancel(&tx, &Address::generate(&s.env)),
+        Err(Ok(Error::NotSigner)),
+        "and it says which rule stopped them"
+    );
+}
+
+/// The watermark is what the list reads: everything below it is dead, and it
+/// only ever moves forward.
+#[test]
+fn test_retired_before_marks_exactly_the_proposals_that_existed() {
+    let s = setup(2);
+    let a = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    s.admin(AdminAction::AddSigner(Address::generate(&s.env)));
+    let b = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+
+    let line = s.vault.retired_before();
+    assert!(a < line, "made before the change — retired");
+    assert!(b >= line, "made after — alive");
+    s.vault.approve(&b, &s.signer(1)); // and it really is usable
 }
 
 /* ================= ownership ================= */

@@ -49,9 +49,13 @@ const CALLOWED: Symbol = symbol_short!("callowed");
 const VERIFIER: Symbol = symbol_short!("verifier");
 /// Shuffled signer commitments — the Merkle leaves a prover needs.
 const COMMITS: Symbol = symbol_short!("commits");
-/// Bumped whenever the signer set changes. A proposal records the value it was
-/// created under; approvals gathered from a different set no longer count.
-const EPOCH: Symbol = symbol_short!("epoch");
+/// Proposals below this id were made under a signer set that no longer exists.
+///
+/// A watermark rather than a per-proposal stamp: when the signer set changes,
+/// every proposal that exists is retired and every later one is not, so the
+/// boundary is a single id. Nothing is written per proposal, nothing is read
+/// per proposal, and the UI learns which are dead from one number.
+const RETIRED: Symbol = symbol_short!("retired");
 
 /// Contract code version, so the dashboard can tell what a vault can do:
 ///   1 — pre-guards (no `version` entry point at all)
@@ -61,7 +65,8 @@ const EPOCH: Symbol = symbol_short!("epoch");
 ///   5 — governance by proposal: no owner-only path to any rule change
 ///   6 — the final approval can settle the proposal in the same transaction
 ///   7 — a signer-set change retires the proposals it would have decided
-const VERSION: u32 = 7;
+///   8 — retired proposals are visible as such, and any signer can clear them
+const VERSION: u32 = 8;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -154,8 +159,6 @@ pub enum DataKey {
     CallAuth(u64),
     /// The configuration change a proposal applies, when it is an admin action.
     Admin(u64),
-    /// The signer-set epoch a proposal was created under.
-    Epoch(u64),
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -342,7 +345,7 @@ pub struct CancelledEvent {
 #[contractevent]
 #[derive(Clone)]
 pub struct SignerSetChangedEvent {
-    #[topic] pub epoch: u32,
+    #[topic] pub retired_below: u64,
 }
 
 #[contractevent]
@@ -842,12 +845,21 @@ impl VaultInstance {
         Self::bump(&env);
         caller.require_auth();
         let p = Self::proposal(&env, tx_id)?;
-        // Proposer only. The owner used to be able to cancel anything, which
-        // meant one key could veto every proposal — including the admin action
-        // that would take that key's powers away. Signers who disagree with a
-        // proposal withhold approval; nobody gets to kill it outright.
+        // Proposer only, for a live proposal. The owner used to be able to
+        // cancel anything, which meant one key could veto every proposal —
+        // including the admin action that would take that key's powers away.
+        // Signers who disagree withhold approval; nobody kills it outright.
+        //
+        // A RETIRED proposal is different: it cannot execute whatever anyone
+        // does, so clearing it is tidying, not vetoing. Any current signer may,
+        // because the proposer is often the person who was just removed — and
+        // otherwise it sits in the pending list forever with nobody able to
+        // touch it.
         if p.proposer != caller {
-            return Err(Error::NotProposer);
+            if tx_id >= Self::retired_below(&env) {
+                return Err(Error::NotProposer);
+            }
+            Self::require_signer(&env, &caller)?;
         }
         Self::require_open(&env, tx_id, &p)?;
 
@@ -933,6 +945,15 @@ impl VaultInstance {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Proposals with an id below this were retired by a signer-set change.
+    ///
+    /// One number for the whole vault, so the list can mark them without a call
+    /// per proposal. They are not pending and never will be — showing them as
+    /// pending forever is what made this worth exposing.
+    pub fn retired_before(env: Env) -> u64 {
+        Self::retired_below(&env)
+    }
+
     pub fn is_cancelled(env: Env, tx_id: u64) -> bool {
         env.storage().persistent().get(&DataKey::Cancelled(tx_id)).unwrap_or(false)
     }
@@ -978,41 +999,35 @@ impl VaultInstance {
     /// A proposal may still be acted on: neither executed nor cancelled.
     /// Retire every proposal made under the outgoing signer set.
     ///
-    /// One counter, not a sweep: the proposals are not touched, they simply stop
-    /// matching. A vault with a thousand proposals costs the same as one with
-    /// three, and the proposal that made this change is itself retired — which
-    /// is correct, since it has already been applied.
-    fn retire_open_proposals(env: &Env) {
-        let next = Self::epoch(env) + 1;
-        env.storage().instance().set(&EPOCH, &next);
-        SignerSetChangedEvent { epoch: next }.publish(env);
+    /// One number, not a sweep: the proposals are not touched, they simply fall
+    /// below the line. A vault with a thousand proposals costs the same as one
+    /// with three, and the proposal that made this change is itself retired —
+    /// which is correct, since it has already been applied.
+    fn retired_below(env: &Env) -> u64 {
+        env.storage().instance().get(&RETIRED).unwrap_or(0)
     }
 
-    fn epoch(env: &Env) -> u32 {
-        env.storage().instance().get(&EPOCH).unwrap_or(0)
+    fn retire_open_proposals(env: &Env) {
+        let watermark: u64 = env.storage().instance().get(&NEXTTX).unwrap_or(0);
+        env.storage().instance().set(&RETIRED, &watermark);
+        SignerSetChangedEvent { retired_below: watermark }.publish(env);
     }
 
     /// Refuse a proposal whose approvals were gathered under a different signer
     /// set.
     ///
-    /// The counter is a plain `u32` because the alternative — recounting the
-    /// approvals against the current signers at execution — cannot work here.
-    /// An anonymous approval records a nullifier and no address, by design, so
-    /// there is nothing to recount it against; asking who gave it is the exact
-    /// question `approve_zk_anon` exists to refuse. One comparison covers both
-    /// kinds of approval and costs a single read.
+    /// `approval_count` is a plain counter, and the alternative — recounting the
+    /// approvals against the current signers — cannot work here. An anonymous
+    /// approval records a nullifier and no address, by design, so there is
+    /// nothing to recount it against; asking who gave it is the exact question
+    /// `approve_zk_anon` exists to refuse. One comparison covers both kinds.
     ///
     /// Retired rather than re-approvable, for the same reason: an anonymous
     /// approver has already burned their nullifier for this `tx_id` and could
     /// not approve it a second time. A fresh proposal gets a fresh id, and with
     /// it fresh nullifiers.
     fn require_current_set(env: &Env, tx_id: u64) -> Result<(), Error> {
-        let made_under: u32 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Epoch(tx_id))
-            .unwrap_or(0); // pre-v7 proposals predate the counter and keep working
-        if made_under != Self::epoch(env) {
+        if tx_id < Self::retired_below(env) {
             return Err(Error::SignerSetChanged);
         }
         Ok(())
@@ -1047,10 +1062,8 @@ impl VaultInstance {
             created_at: env.ledger().sequence(),
         };
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
-        env.storage().persistent().set(&DataKey::Epoch(tx_id), &Self::epoch(env));
         Self::bump(&env);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
-        Self::bump_key(&env, &DataKey::Epoch(tx_id));
         env.storage().instance().set(&NEXTTX, &(tx_id + 1));
 
         ProposedEvent { tx_id, proposer, target, amount, private_mode }.publish(env);
