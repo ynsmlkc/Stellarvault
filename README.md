@@ -64,7 +64,8 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | **dApp frontend**                               | ✅ **Working**           | Next.js 14 + Freighter, live on-chain reads, wallet-signed writes, cinematic "Vault Gold" UI                                                                                                                          |
 | **Safe-style factory — one contract per vault** | ✅ **Live**              | a factory deploys a fresh contract per vault (own address, own native balance, on-chain `owner→vaults` registry) + per-vault names — true Gnosis-Safe architecture                                                    |
 | **Confidential balances**                       | ✅ **Live on testnet**   | a vault holds a second balance on OpenZeppelin's confidential token (Pedersen commitments, UltraHonk proofs) wrapping real XLM — **amounts never appear on-chain**. Every operation is an ordinary proposal, so the threshold and time-lock govern it. Sender and recipient stay public; the auditor channel is bound to a key nobody holds (see below) |
-| **Safe-style guards**                           | ✅ **Live on testnet**   | owner-set policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
+| **Governance by proposal**                      | ✅ **Live on testnet**   | threshold, signers, guards, allowlists, ownership and the contract's own code all change only by proposal at the vault's own threshold — no owner-only path to any rule, and no unilateral veto |
+| **Safe-style guards**                           | ✅ **Live on testnet**   | policy enforced on every execution — per-transaction limit, rolling spending cap, time-lock, recipient allowlist — plus **batch (multi-call)** proposals, cancellation and typed contract errors             |
 | **Arbitrary contract calls**                    | ✅ **Live on testnet**   | a proposal can call any allowlisted contract — swap on a DEX, supply to a lending market, move an asset the vault wasn't created with. Multi-asset falls out of it; the vault can never call itself |
 | **On-chain Groth16 verify**                     | ✅ **Live on testnet**   | a verifier contract keyed to **our** circuit's vk checks every ZK approval, and the vault pins all four public inputs to itself, its published signer set and the specific proposal — so anonymity is now a guarantee, not a convention |
 
@@ -135,8 +136,8 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 63 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 53 pass (vault + guards + zk + calls + ownership)
+# 70 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 60 pass (vault + guards + zk + calls + governance)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
 cargo test --manifest-path vault-factory/Cargo.toml    # 4 pass  (init guard, registry, forget/remember)
 
@@ -265,18 +266,26 @@ Three separate things had to be true, and each was a distinct fix:
 - **Whoever collects the commitments knows the mapping**, unless registration is itself relayed.
 - **The submitter is still a public account.** `approve_zk_anon` makes relaying *possible*; until a relayer exists, a signer submitting their own proof is still named by the transaction.
 
-### The owner is still a single point of authority
+### Governance is m-of-n too
 
-Worth stating plainly, because it cuts across everything above. `set_threshold`,
-`add_signer`, `remove_signer`, `set_policy`, the allowlists and `upgrade` are
-gated on one address — so today the owner can lower the threshold to 1, or
-replace the contract's code outright, without asking any co-signer. Every guard
-on this page sits behind that one key.
+Every rule the vault runs on — threshold, signer set, guards, both allowlists,
+verifier config, ownership, and the contract's own code — changes only by
+proposal, at the same threshold as a payment, under the same time-lock. There is
+no owner-only entry point to any of it.
 
-That is not what Safe does: there, changing the owner set is itself a
-transaction that needs the threshold. Routing these through the proposal
-mechanism is the next change, and until it lands the vault is m-of-n for
-spending and 1-of-1 for governance.
+This was not true until v5. The owner could lower the threshold to 1 or replace
+the code outright, so every guard on this page sat behind one key. Safe solves
+it by having the multi-sig call itself; Soroban refuses to re-enter a contract
+that is on the call stack, so the change travels as data the vault applies to
+itself instead.
+
+The owner's power to cancel any proposal went with it — a key that can veto the
+proposal removing it is not constrained by that proposal. Cancelling belongs to
+the proposer; signers who disagree simply withhold approval.
+
+Verified live on a 2-of-3 testnet vault: `SetThreshold(1)` with one approval
+fails with `Error(Contract, #10)` and the threshold does not move; with two, it
+does.
 
 ---
 
