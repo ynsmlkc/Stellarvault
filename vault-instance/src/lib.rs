@@ -52,6 +52,13 @@ const VERSION: u32 = 4;
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
 
+/// Storage lifetime, in ledgers. A treasury is idle by nature — months can pass
+/// between transactions — and an entry whose TTL runs out is archived, taking
+/// the vault offline until somebody restores it. Every write bumps the clock:
+/// ~30 days of headroom, renewed whenever the TTL drops below ~10 days.
+const TTL_LOW: u32 = 172_800;
+const TTL_EXTEND: u32 = 518_400;
+
 const MAX_ALLOWED: u32 = 50;
 const MAX_BATCH: u32 = 20;
 
@@ -105,6 +112,9 @@ pub enum Error {
     CallAllowlistFull = 29,
     /// Anonymous approval needs on-chain verification switched on first.
     VerificationNotEnabled = 30,
+    // --- ownership ---
+    /// `transfer_ownership` was called with the address that already owns it.
+    SameOwner = 31,
 }
 
 #[contracttype]
@@ -274,6 +284,13 @@ pub struct ExecutedEvent {
 pub struct CancelledEvent {
     #[topic] pub tx_id: u64,
     pub cancelled_by: Address,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct OwnershipTransferredEvent {
+    #[topic] pub from: Address,
+    #[topic] pub to: Address,
 }
 
 #[contractevent]
@@ -463,6 +480,7 @@ impl VaultInstance {
 
     /// Transparent approval — identity visible.
     pub fn approve(env: Env, tx_id: u64, signer: Address) -> Result<(), Error> {
+        Self::bump(&env);
         signer.require_auth();
         Self::require_signer(&env, &signer)?;
         let mut p = Self::proposal(&env, tx_id)?;
@@ -473,6 +491,7 @@ impl VaultInstance {
         env.storage().persistent().set(&DataKey::Approval(tx_id, signer.clone()), &true);
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+        Self::bump_key(&env, &DataKey::Proposal(tx_id));
 
         ApprovedEvent { tx_id, signer }.publish(&env);
         Ok(())
@@ -485,6 +504,7 @@ impl VaultInstance {
     /// that, the vault only records the nullifier — see [`set_zk_config`] for
     /// why that weaker mode still exists.
     pub fn approve_zk(env: Env, tx_id: u64, signer: Address, zk: ZKApproval) -> Result<(), Error> {
+        Self::bump(&env);
         signer.require_auth();
         Self::require_signer(&env, &signer)?;
         let mut p = Self::proposal(&env, tx_id)?;
@@ -498,8 +518,10 @@ impl VaultInstance {
         }
         Self::check_proof(&env, tx_id, &zk)?;
         env.storage().persistent().set(&nk, &true);
+        Self::bump_key(&env, &nk);
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+        Self::bump_key(&env, &DataKey::Proposal(tx_id));
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -522,6 +544,7 @@ impl VaultInstance {
     /// This is refused unless verification is enabled — without it the proof is
     /// not checked, and dropping the auth as well would let anyone approve.
     pub fn approve_zk_anon(env: Env, tx_id: u64, zk: ZKApproval) -> Result<(), Error> {
+        Self::bump(&env);
         if Self::get_zk_config(env.clone()).is_none() {
             return Err(Error::VerificationNotEnabled);
         }
@@ -538,8 +561,10 @@ impl VaultInstance {
         Self::check_proof(&env, tx_id, &zk)?;
 
         env.storage().persistent().set(&nk, &true);
+        Self::bump_key(&env, &nk);
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+        Self::bump_key(&env, &DataKey::Proposal(tx_id));
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -552,6 +577,7 @@ impl VaultInstance {
     /// Every guard is re-checked here, not just at propose time: the owner may
     /// have tightened the policy while the proposal was collecting approvals.
     pub fn execute(env: Env, tx_id: u64, executor: Address) -> Result<(), Error> {
+        Self::bump(&env);
         executor.require_auth();
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
@@ -600,10 +626,17 @@ impl VaultInstance {
                 env.authorize_as_current_contract(entries);
             }
 
-            env.invoke_contract::<Val>(&spec.contract, &spec.function, spec.args.clone());
-
+            // Marked spent BEFORE the call, following checks-effects-
+            // interactions. Soroban already forbids re-entry outright — a
+            // contract on the call stack cannot be called again, even for a
+            // read — so this ordering is not what stops a hostile callee, and
+            // the tests say so. It costs nothing and removes the need to rely
+            // on that guarantee holding for every future shape of this branch.
             p.executed = true;
             env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+
+            env.invoke_contract::<Val>(&spec.contract, &spec.function, spec.args.clone());
+
             CallExecutedEvent {
                 tx_id,
                 contract: spec.contract,
@@ -640,6 +673,10 @@ impl VaultInstance {
         // rolling spending cap — booked before transferring
         Self::charge_window(&env, &policy, p.amount)?;
 
+        // Same ordering as the call branch, for the same reason.
+        p.executed = true;
+        env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+
         match batch {
             Some(items) => {
                 for item in items.iter() {
@@ -649,15 +686,13 @@ impl VaultInstance {
             None => client.transfer(&vault, &p.target, &p.amount),
         }
 
-        p.executed = true;
-        env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
-
         ExecutedEvent { tx_id, executed_by: executor, private_mode: p.private_mode }.publish(&env);
         Ok(())
     }
 
     /// Cancel a pending proposal. The proposer or the owner may cancel.
     pub fn cancel(env: Env, tx_id: u64, caller: Address) -> Result<(), Error> {
+        Self::bump(&env);
         caller.require_auth();
         let p = Self::proposal(&env, tx_id)?;
         let owner: Address = env.storage().instance().get(&OWNER).unwrap();
@@ -860,6 +895,24 @@ impl VaultInstance {
         Ok(())
     }
 
+    /// Hand the owner role to another address.
+    ///
+    /// Without this the role is permanent: an owner who loses that key leaves a
+    /// vault whose signers, threshold and policy can never change again, and
+    /// whose funds are only as movable as the current signer set allows. The new
+    /// owner must authorise too, so the role cannot be pushed onto an address
+    /// that cannot use it — a typo would otherwise be unrecoverable.
+    pub fn transfer_ownership(env: Env, new_owner: Address) -> Result<(), Error> {
+        let old = Self::require_owner(&env);
+        if old == new_owner {
+            return Err(Error::SameOwner);
+        }
+        new_owner.require_auth();
+        env.storage().instance().set(&OWNER, &new_owner);
+        OwnershipTransferredEvent { from: old, to: new_owner }.publish(&env);
+        Ok(())
+    }
+
     /// Owner-gated code upgrade. Without this an already-deployed vault would be
     /// frozen on the WASM it was born with — `factory.set_wasm` only affects
     /// vaults created after it.
@@ -982,15 +1035,30 @@ impl VaultInstance {
             created_at: env.ledger().sequence(),
         };
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+        Self::bump(&env);
+        Self::bump_key(&env, &DataKey::Proposal(tx_id));
         env.storage().instance().set(&NEXTTX, &(tx_id + 1));
 
         ProposedEvent { tx_id, proposer, target, amount, private_mode }.publish(env);
         tx_id
     }
 
+    /// Push the instance's archival deadline out. Called from every write, so a
+    /// vault in regular use never approaches it; one left idle past the limit is
+    /// archived rather than lost, and a `RestoreFootprint` brings it back.
+    fn bump(env: &Env) {
+        env.storage().instance().extend_ttl(TTL_LOW, TTL_EXTEND);
+    }
+
+    /// Same, for one persistent entry (a proposal, a nullifier, a batch).
+    fn bump_key(env: &Env, key: &DataKey) {
+        env.storage().persistent().extend_ttl(key, TTL_LOW, TTL_EXTEND);
+    }
+
     fn require_owner(env: &Env) -> Address {
         let owner: Address = env.storage().instance().get(&OWNER).unwrap();
         owner.require_auth();
+        Self::bump(env);
         owner
     }
 

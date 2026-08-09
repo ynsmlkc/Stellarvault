@@ -79,3 +79,39 @@ export async function getConnectedAddress(): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Human amount string -> stroops.
+ *
+ * Done on the string rather than through `Number`, because `n * 1e7` loses
+ * precision above ~9e8 XLM and this is money. Anything ambiguous is refused
+ * instead of guessed: `"1,5"` is 1.5 to a Turkish reader and malformed to an
+ * American one, and the app displays en-US, so it cannot be resolved safely.
+ *
+ * Throws with a message meant for the user.
+ */
+export function toStroops(input: string): bigint {
+  const s = input.trim();
+  if (!s) throw new Error("Enter an amount.");
+
+  // en-US grouping is accepted because that is what the app itself prints.
+  if (!/^\d{1,3}(,\d{3})*(\.\d+)?$/.test(s) && !/^\d+(\.\d+)?$/.test(s)) {
+    throw new Error("Amounts look like 12.5 or 1,000.25 — use a dot for decimals.");
+  }
+
+  const [whole, frac = ""] = s.replace(/,/g, "").split(".");
+  if (frac.length > 7) throw new Error("XLM has at most 7 decimal places.");
+
+  const stroops = BigInt(whole) * 10_000_000n + BigInt(frac.padEnd(7, "0") || "0");
+  if (stroops <= 0n) throw new Error("Enter an amount greater than zero.");
+  return stroops;
+}
+
+/** Same, for the places that want a value or nothing rather than a throw. */
+export function toStroopsSafe(input: string): bigint | null {
+  try {
+    return toStroops(input);
+  } catch {
+    return null;
+  }
+}

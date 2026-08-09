@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { CONFIG, shortAddr, formatXLM, contractExplorerUrl } from "@/lib/stellar";
+import { CONFIG, shortAddr, formatXLM, contractExplorerUrl, toStroops, toStroopsSafe } from "@/lib/stellar";
 import { proposeCallRaw, allowContract, getAllowedContracts, describeError, type SubCall } from "@/lib/contract";
 import {
   vaultConfidentialKey,
@@ -79,12 +79,6 @@ const gold: React.CSSProperties = {
   padding: 13,
   borderRadius: 10,
   cursor: "pointer",
-};
-
-const toStroops = (s: string): bigint => {
-  const n = Number(String(s).replace(/,/g, "").trim());
-  if (!isFinite(n) || n <= 0) throw new Error("Enter a valid amount.");
-  return BigInt(Math.round(n * 1e7));
 };
 
 export default function Confidential({

@@ -9,7 +9,9 @@
     "lint": "next lint",
     "vendor:bb": "node scripts/vendor-bb.mjs",
     "predev": "node scripts/vendor-bb.mjs",
-    "prebuild": "node scripts/vendor-bb.mjs"
+    "prebuild": "node scripts/vendor-bb.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aztec/bb.js": "^0.87.0",
@@ -30,6 +32,7 @@
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
   }
 }

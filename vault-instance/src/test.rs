@@ -1012,3 +1012,102 @@ fn test_auth_target_must_be_allowlisted() {
         Err(Ok(Error::ContractNotAllowed))
     );
 }
+
+/* ================= re-entrancy ================= */
+
+/// A callee that calls back into the vault while the vault's own `execute` is
+/// still on the stack. An allowlisted contract is not a trusted one — it can be
+/// upgraded, or be a router that got compromised — so what stops it matters.
+#[contract]
+pub struct Reenterer;
+
+#[contractimpl]
+impl Reenterer {
+    pub fn go(env: Env, vault: Address, tx_id: u64) {
+        let me = env.current_contract_address();
+        let _: () = env.invoke_contract(
+            &vault,
+            &Symbol::new(&env, "execute"),
+            vec![&env, tx_id.into_val(&env), me.into_val(&env)],
+        );
+    }
+
+    /// Not `execute` — a plain read. Included because the interesting question
+    /// is whether the vault is protected by its own ordering or by the host.
+    pub fn peek(env: Env, vault: Address) {
+        let _: i128 = env.invoke_contract(&vault, &Symbol::new(&env, "get_balance"), vec![&env]);
+    }
+}
+
+/// The host refuses re-entry outright: a contract already on the call stack
+/// cannot be called again, with `Error(Context, InvalidAction)`. So an
+/// allowlisted callee cannot drive the vault a second time within one
+/// execution, and the attempt takes the whole transaction down rather than
+/// half-completing it.
+///
+/// This is a property of Soroban, not of our ordering — `execute` writes
+/// `executed` before the call as well, but that is defence in depth. The test
+/// is here so that if the guarantee ever weakens, something says so.
+#[test]
+fn test_callee_cannot_re_enter_the_vault() {
+    let s = setup(1);
+    let r = s.env.register(Reenterer, ());
+    s.vault.allow_contract(&r);
+
+    let args = vec![&s.env, s.vault_addr.into_val(&s.env), 0u64.into_val(&s.env)];
+    let tx = s.vault.propose_call(&s.signer(0), &r, &symbol_short!("go"), &args, &Vec::new(&s.env), &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err(), "re-entry must not go through");
+    assert!(!s.vault.get_proposal(&tx).executed, "and the failed execution rolls back whole");
+}
+
+/// Even a read-only call back is refused, which is what shows the protection is
+/// the host's blanket rule rather than anything specific to `execute`.
+#[test]
+fn test_even_a_read_back_into_the_vault_is_refused() {
+    let s = setup(1);
+    let r = s.env.register(Reenterer, ());
+    s.vault.allow_contract(&r);
+
+    let args = vec![&s.env, s.vault_addr.into_val(&s.env)];
+    let tx = s.vault.propose_call(&s.signer(0), &r, &symbol_short!("peek"), &args, &Vec::new(&s.env), &false);
+    s.vault.approve(&tx, &s.signer(0));
+
+    assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err());
+}
+
+/* ================= ownership ================= */
+
+#[test]
+fn test_transfer_ownership_moves_the_role() {
+    let s = setup(1);
+    let next = Address::generate(&s.env);
+    s.vault.transfer_ownership(&next);
+
+    assert_eq!(s.vault.get_config().owner, next);
+}
+
+#[test]
+fn test_transfer_ownership_rejects_the_current_owner() {
+    let s = setup(1);
+    assert_eq!(
+        s.vault.try_transfer_ownership(&s.owner),
+        Err(Ok(Error::SameOwner)),
+        "handing the role to whoever already holds it is a no-op worth catching"
+    );
+}
+
+/// The point of the role moving is that it actually moves: the new owner can
+/// use it, and the vault still has exactly one.
+#[test]
+fn test_new_owner_can_administer() {
+    let s = setup(1);
+    let next = Address::generate(&s.env);
+    s.vault.transfer_ownership(&next);
+
+    let target = Address::generate(&s.env);
+    s.vault.allow_recipient(&target);
+    assert_eq!(s.vault.get_allowed().len(), 1);
+    assert_eq!(s.vault.get_config().owner, next, "and it did not drift back");
+}

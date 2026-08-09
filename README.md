@@ -135,8 +135,8 @@ Each vault is its own contract, deployed by the factory — view a vault by its 
 ### 1. Contract tests
 
 ```bash
-# 58 unit tests across the live contract crates
-cargo test --manifest-path vault-instance/Cargo.toml   # 48 pass (vault + guards + zk + calls)
+# 63 unit tests across the live contract crates
+cargo test --manifest-path vault-instance/Cargo.toml   # 53 pass (vault + guards + zk + calls + ownership)
 cargo test --manifest-path groth16-verifier/Cargo.toml  # 6 pass  (Groth16 over BN254)
 cargo test --manifest-path vault-factory/Cargo.toml    # 4 pass  (init guard, registry, forget/remember)
 
@@ -152,6 +152,17 @@ circom voteApproval.circom --wasm --r1cs -l node_modules/circomlib/circuits -o b
 # trusted setup + a real prove/verify roundtrip:
 node test.mjs         # ✓ proof generated, verified, soundness + double-vote checks
 ```
+
+### 3. Frontend unit tests
+
+```bash
+cd web && npm test        # 18 tests — amount parsing, formatting, error mapping, Fp2 proof ordering
+```
+
+Rendering is not covered: it needs a browser, a wallet and a live chain. The
+suite targets the pure logic instead, which is where this project's UI bugs have
+actually lived — an amount parser that read `1,5` as 15, a proof encoder whose
+G2 byte order silently invalidated every proof.
 
 ### 3. Frontend
 
@@ -253,6 +264,19 @@ Three separate things had to be true, and each was a distinct fix:
 - **The anonymity set is the signer count.** If 2 of 3 approved, an observer knows exactly that — each signer is 2/3 likely to be one of them. This is structural: proving the threshold was met is the point. It only becomes meaningful privacy with a larger signer set (the tree holds 16).
 - **Whoever collects the commitments knows the mapping**, unless registration is itself relayed.
 - **The submitter is still a public account.** `approve_zk_anon` makes relaying *possible*; until a relayer exists, a signer submitting their own proof is still named by the transaction.
+
+### The owner is still a single point of authority
+
+Worth stating plainly, because it cuts across everything above. `set_threshold`,
+`add_signer`, `remove_signer`, `set_policy`, the allowlists and `upgrade` are
+gated on one address — so today the owner can lower the threshold to 1, or
+replace the contract's code outright, without asking any co-signer. Every guard
+on this page sits behind that one key.
+
+That is not what Safe does: there, changing the owner set is itself a
+transaction that needs the threshold. Routing these through the proposal
+mechanism is the next change, and until it lands the vault is m-of-n for
+spending and 1-of-1 for governance.
 
 ---
 

@@ -153,7 +153,7 @@ const VAULT_ERRORS: Record<number, string> = {
   28: "A vault can never call itself — that would let one proposal lift every guard.",
   29: "The call allowlist is full (50 max).",
   30: "Turn on on-chain verification before approving anonymously.",
-  31: "That contract may not act on the vault's behalf — allowlist it first.",
+  31: "That address already owns this vault.",
 };
 
 /**
@@ -469,7 +469,7 @@ export const approve = (vaultAddr: string, txId: number, signer: string) =>
   invoke(vaultAddr, "approve", [u64(txId), addr(signer)], signer);
 
 /* ---- ZK approval (private mode) ---- */
-function fieldTo32(dec: string): Uint8Array {
+export function fieldTo32(dec: string): Uint8Array {
   let h = BigInt(dec).toString(16);
   h = h.length > 64 ? h.slice(-64) : h.padStart(64, "0");
   const out = new Uint8Array(32);
@@ -485,7 +485,7 @@ function fieldTo32(dec: string): Uint8Array {
  * imaginary part first. Emitting them in snarkjs order builds a verifier that
  * silently rejects every valid proof, which is a miserable thing to debug.
  */
-function proofTo256(proof: any): Uint8Array {
+export function proofTo256(proof: any): Uint8Array {
   const parts = [
     proof.pi_a[0], proof.pi_a[1],
     // b: x_c1, x_c0, y_c1, y_c0  (each snarkjs pair reversed)

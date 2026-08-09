@@ -9,6 +9,7 @@ import {
   shortContract,
   formatXLM,
   contractExplorerUrl,
+  toStroopsSafe,
 } from "@/lib/stellar";
 import {
   getVault,
@@ -1024,13 +1025,6 @@ function AppShell(p: ShellProps) {
       </div>
     </div>
   );
-}
-
-/** "12.5" → stroops, or null when it is not a usable amount. */
-function toStroopsSafe(s: string): bigint | null {
-  const n = Number(s.trim().replace(",", "."));
-  if (!isFinite(n) || n <= 0) return null;
-  return BigInt(Math.round(n * 1e7));
 }
 
 /* ============================ WALLET MENU ============================ */
