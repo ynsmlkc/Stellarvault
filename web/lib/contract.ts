@@ -335,29 +335,6 @@ export async function getSignerCommitments(vaultAddr: string): Promise<bigint[]>
   }
 }
 
-export const setSignerCommitments = (vaultAddr: string, owner: string, commitments: bigint[]) =>
-  invoke(vaultAddr, "set_signer_commitments", [xdr.ScVal.scvVec(commitments.map(u256))], owner);
-
-/**
- * Point this vault at newer code. Owner-gated, and the only way an existing
- * vault ever gets a fix: `factory.set_wasm` decides what NEW vaults are born
- * with and leaves everything already deployed exactly where it was.
- */
-export const upgradeVault = (vaultAddr: string, owner: string, wasmHash: string) =>
-  invoke(
-    vaultAddr,
-    "upgrade",
-    [nativeToScVal(Buffer.from(wasmHash, "hex"), { type: "bytes" })],
-    owner
-  );
-
-export const setZkConfig = (
-  vaultAddr: string,
-  owner: string,
-  verifier: string,
-  vaultId: bigint,
-  signerRoot: bigint
-) => invoke(vaultAddr, "set_zk_config", [addr(verifier), u256(vaultId), u256(signerRoot)], owner);
 
 /** Amount already spent in the vault's current cap window. */
 export async function getSpentInWindow(vaultAddr: string): Promise<bigint> {
@@ -531,7 +508,7 @@ export const execute = (vaultAddr: string, txId: number, executor: string) =>
 export const cancel = (vaultAddr: string, txId: number, caller: string) =>
   invoke(vaultAddr, "cancel", [u64(txId), addr(caller)], caller);
 
-/* ---------------- guards (owner-only writes) ---------------- */
+/* ---------------- guards ---------------- */
 /** Struct fields must be emitted in symbol order, hence the alphabetical keys. */
 const policyScVal = (p: Policy) =>
   xdr.ScVal.scvMap([
@@ -547,14 +524,6 @@ const batchScVal = (items: BatchItem[]) =>
     items.map((it) => xdr.ScVal.scvMap([entry("amount", i128(it.amount)), entry("target", addr(it.target))]))
   );
 
-export const setPolicy = (vaultAddr: string, owner: string, policy: Policy) =>
-  invoke(vaultAddr, "set_policy", [policyScVal(policy)], owner);
-
-export const allowRecipient = (vaultAddr: string, owner: string, target: string) =>
-  invoke(vaultAddr, "allow_recipient", [addr(target)], owner);
-
-export const revokeRecipient = (vaultAddr: string, owner: string, target: string) =>
-  invoke(vaultAddr, "revoke_recipient", [addr(target)], owner);
 
 /* ---------------- arbitrary contract calls ---------------- */
 
@@ -640,11 +609,6 @@ export const proposeCallRaw = (
     proposer
   );
 
-export const allowContract = (vaultAddr: string, owner: string, contract: string) =>
-  invoke(vaultAddr, "allow_contract", [addr(contract)], owner);
-
-export const revokeContract = (vaultAddr: string, owner: string, contract: string) =>
-  invoke(vaultAddr, "revoke_contract", [addr(contract)], owner);
 
 /** Batch (multi-call): N payments approved once and executed atomically. */
 export const proposeBatch = (
@@ -675,3 +639,103 @@ export const confidentialMergeSelf = (wallet: string, args: xdr.ScVal[]) =>
 /** `withdraw` on the confidential token, for a wallet's own account. */
 export const confidentialWithdrawSelf = (wallet: string, args: xdr.ScVal[]) =>
   invoke(CONFIG.confidentialTokenId, "withdraw", args, wallet);
+
+/* ---------------- governance ---------------- */
+
+/**
+ * A change to the vault's own rules.
+ *
+ * These used to be direct owner calls, which made the vault m-of-n for spending
+ * and 1-of-1 for governance — one key could lower the threshold or replace the
+ * contract's code. Each is now a proposal, approved at the same threshold as a
+ * payment.
+ */
+export type AdminAction =
+  | { kind: "SetThreshold"; threshold: number }
+  | { kind: "AddSigner"; signer: string }
+  | { kind: "RemoveSigner"; signer: string }
+  | { kind: "SetPolicy"; policy: Policy }
+  | { kind: "AllowRecipient"; target: string }
+  | { kind: "RevokeRecipient"; target: string }
+  | { kind: "AllowContract"; contract: string }
+  | { kind: "RevokeContract"; contract: string }
+  | { kind: "SetZkConfig"; verifier: string; vaultId: bigint; signerRoot: bigint }
+  | { kind: "SetSignerCommitments"; commitments: bigint[] }
+  | { kind: "TransferOwnership"; owner: string }
+  | { kind: "Upgrade"; wasmHash: string };
+
+/** Rust enum variants travel as a vec of [symbol, ...payload]. */
+function adminScVal(a: AdminAction): xdr.ScVal {
+  const v = (name: string, ...rest: xdr.ScVal[]) =>
+    xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(name), ...rest]);
+  switch (a.kind) {
+    case "SetThreshold": return v("SetThreshold", u32(a.threshold));
+    case "AddSigner": return v("AddSigner", addr(a.signer));
+    case "RemoveSigner": return v("RemoveSigner", addr(a.signer));
+    case "SetPolicy": return v("SetPolicy", policyScVal(a.policy));
+    case "AllowRecipient": return v("AllowRecipient", addr(a.target));
+    case "RevokeRecipient": return v("RevokeRecipient", addr(a.target));
+    case "AllowContract": return v("AllowContract", addr(a.contract));
+    case "RevokeContract": return v("RevokeContract", addr(a.contract));
+    case "SetZkConfig":
+      // struct fields in symbol order
+      return v("SetZkConfig", xdr.ScVal.scvMap([
+        entry("signer_root", u256(a.signerRoot)),
+        entry("vault_id", u256(a.vaultId)),
+        entry("verifier", addr(a.verifier)),
+      ]));
+    case "SetSignerCommitments":
+      return v("SetSignerCommitments", xdr.ScVal.scvVec(a.commitments.map(u256)));
+    case "TransferOwnership": return v("TransferOwnership", addr(a.owner));
+    case "Upgrade":
+      return v("Upgrade", nativeToScVal(Buffer.from(a.wasmHash, "hex"), { type: "bytes" }));
+  }
+}
+
+export const proposeAdmin = (vaultAddr: string, proposer: string, action: AdminAction) =>
+  invoke(vaultAddr, "propose_admin", [addr(proposer), adminScVal(action)], proposer);
+
+/** The rule change a proposal applies, or null when it is not an admin action. */
+export async function getAdmin(vaultAddr: string, txId: number): Promise<AdminAction | null> {
+  try {
+    const a = await simulate(vaultAddr, "get_admin", [u64(txId)]);
+    if (!a) return null;
+    const [name, payload] = a as [string, any];
+    switch (name) {
+      case "SetThreshold": return { kind: "SetThreshold", threshold: Number(payload) };
+      case "AddSigner": return { kind: "AddSigner", signer: String(payload) };
+      case "RemoveSigner": return { kind: "RemoveSigner", signer: String(payload) };
+      case "SetPolicy": return { kind: "SetPolicy", policy: payload as Policy };
+      case "AllowRecipient": return { kind: "AllowRecipient", target: String(payload) };
+      case "RevokeRecipient": return { kind: "RevokeRecipient", target: String(payload) };
+      case "AllowContract": return { kind: "AllowContract", contract: String(payload) };
+      case "RevokeContract": return { kind: "RevokeContract", contract: String(payload) };
+      case "SetZkConfig": return { kind: "SetZkConfig", verifier: String(payload.verifier), vaultId: payload.vault_id, signerRoot: payload.signer_root };
+      case "SetSignerCommitments": return { kind: "SetSignerCommitments", commitments: payload as bigint[] };
+      case "TransferOwnership": return { kind: "TransferOwnership", owner: String(payload) };
+      case "Upgrade": return { kind: "Upgrade", wasmHash: Buffer.from(payload).toString("hex") };
+      default: return null;
+    }
+  } catch {
+    return null; // pre-v5 vault, or not an admin proposal
+  }
+}
+
+/** One line describing what a rule change would do, for the proposal list. */
+export function describeAdmin(a: AdminAction): string {
+  const short = (x: string) => `${x.slice(0, 4)}…${x.slice(-4)}`;
+  switch (a.kind) {
+    case "SetThreshold": return `Require ${a.threshold} approvals`;
+    case "AddSigner": return `Add signer ${short(a.signer)}`;
+    case "RemoveSigner": return `Remove signer ${short(a.signer)}`;
+    case "SetPolicy": return "Change the spending guards";
+    case "AllowRecipient": return `Allow payments to ${short(a.target)}`;
+    case "RevokeRecipient": return `Stop payments to ${short(a.target)}`;
+    case "AllowContract": return `Allow calls to ${short(a.contract)}`;
+    case "RevokeContract": return `Stop calls to ${short(a.contract)}`;
+    case "SetZkConfig": return "Turn on on-chain proof verification";
+    case "SetSignerCommitments": return `Publish ${a.commitments.length} signer commitments`;
+    case "TransferOwnership": return `Hand ownership to ${short(a.owner)}`;
+    case "Upgrade": return `Replace the vault's code (${a.wasmHash.slice(0, 8)}…)`;
+  }
+}

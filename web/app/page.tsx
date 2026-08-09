@@ -31,18 +31,13 @@ import {
   getStatus,
   getZkConfig,
   getVersion,
-  upgradeVault,
   getCall,
   getAllowedContracts,
   getSignerCommitments,
-  setSignerCommitments,
   proposeCall,
-  allowContract,
-  revokeContract,
-  setZkConfig as setZkConfigTx,
-  setPolicy as setPolicyTx,
-  allowRecipient,
-  revokeRecipient,
+  proposeAdmin,
+  getAdmin,
+  describeAdmin,
   describeError,
   OPEN_POLICY,
   type VaultConfig,
@@ -54,6 +49,7 @@ import {
   type CallArg,
   type CallArgType,
   type CallSpec,
+  type AdminAction,
 } from "@/lib/contract";
 import { registerConfidentialAccount, confidentialMergeSelf, confidentialWithdrawSelf } from "@/lib/contract";
 import { isRegistered, walletConfidentialKey, buildRegisterArgs, readConfidentialBalance, buildMergeArgs, buildWithdrawArgs, type ConfidentialBalance } from "@/lib/confidential";
@@ -181,6 +177,7 @@ export default function Page() {
   // this signer's own leaf, shown once so they can hand it to the owner
   const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
+  const [admins, setAdmins] = useState<Record<number, AdminAction>>({});
 
   const loadData = useCallback(async (addr: string = vaultAddress) => {
     if (!addr) return;
@@ -218,13 +215,20 @@ export default function Page() {
       });
       setStatuses(map);
 
-      // which proposals are contract calls rather than transfers
-      const cs = await Promise.all(p.map((x) => getCall(addr, x.id)));
+      // which proposals are contract calls, and which change the vault's own
+      // rules — both look like zero-amount transfers to self in `Proposal`
+      const [cs, ad] = await Promise.all([
+        Promise.all(p.map((x) => getCall(addr, x.id))),
+        Promise.all(p.map((x) => getAdmin(addr, x.id))),
+      ]);
       const callMap: Record<number, CallSpec> = {};
+      const adminMap: Record<number, AdminAction> = {};
       p.forEach((x, i) => {
         if (cs[i]) callMap[x.id] = cs[i]!;
+        if (ad[i]) adminMap[x.id] = ad[i]!;
       });
       setCalls(callMap);
+      setAdmins(adminMap);
     } catch (e) {
       // leave nulls; UI falls back to skeleton/empty
     } finally {
@@ -523,83 +527,68 @@ export default function Page() {
     }
   };
 
-  const doAllowContract = async (contract: string, allow: boolean) => {
+  /**
+   * Propose a change to the vault's own rules.
+   *
+   * These used to happen the moment the owner clicked — one key could lower the
+   * threshold, clear the guards or replace the contract's code. Each is now a
+   * proposal that needs the same threshold as spending, so the button no longer
+   * changes anything by itself, and the toast has to say so.
+   */
+  const proposeRule = async (action: AdminAction, busyKey: string, what: string) => {
     const w = requireWallet();
     if (!w) return;
-    setBusy(`callee-${contract}`);
+    setBusy(busyKey);
     try {
-      await (allow ? allowContract : revokeContract)(vaultAddress, w, contract);
+      const txId = await proposeAdmin(vaultAddress, w, action);
       refreshSoon();
       showToast({
-        title: allow ? "Contract allowed" : "Contract revoked",
-        sub: allow
-          ? "Proposals may now call it."
-          : "Pending calls to it can no longer execute.",
+        title: `Proposed · #${txId.returnValue}`,
+        sub: `${what} — it takes effect once the signers approve and it is executed.`,
         tone: "ok",
       });
     } catch (e: any) {
-      showToast({ title: "Call allowlist update failed", sub: cleanErr(e), tone: "err" });
+      showToast({ title: "Couldn't propose the change", sub: cleanErr(e), tone: "err" });
     } finally {
       setBusy(null);
     }
   };
+
+  const doAllowContract = (contract: string, allow: boolean) =>
+    proposeRule(
+      allow ? { kind: "AllowContract", contract } : { kind: "RevokeContract", contract },
+      `callee-${contract}`,
+      allow ? "Proposals would be able to call it" : "Calls to it would stop"
+    );
 
   /**
    * Bring this vault onto the code the factory now serves. Existing vaults keep
    * whatever they were deployed with — a fix only reaches them through here.
+   *
+   * The heaviest change there is: new code can redefine every other rule. That
+   * is exactly why it needs the threshold rather than one key.
    */
   const doUpgrade = async () => {
-    const w = requireWallet();
-    if (!w) return;
     if (!CONFIG.vaultWasmHash) {
       showToast({ title: "No target build configured", sub: "NEXT_PUBLIC_VAULT_WASM_HASH is unset.", tone: "err" });
       return;
     }
-    setBusy("upgrade");
-    try {
-      await upgradeVault(vaultAddress, w, CONFIG.vaultWasmHash);
-      refreshSoon();
-      showToast({ title: "Vault upgraded", sub: "It now runs the same code new vaults are created with.", tone: "ok" });
-    } catch (e: any) {
-      showToast({ title: "Upgrade failed", sub: cleanErr(e), tone: "err" });
-    } finally {
-      setBusy(null);
-    }
+    await proposeRule(
+      { kind: "Upgrade", wasmHash: CONFIG.vaultWasmHash },
+      "upgrade",
+      "The vault would run the code new vaults are created with"
+    );
   };
 
-  const doSavePolicy = async (next: Policy) => {
-    const w = requireWallet();
-    if (!w) return;
-    setBusy("policy");
-    try {
-      await setPolicyTx(vaultAddress, w, next);
-      refreshSoon();
-      showToast({ title: "Guards updated", sub: "Enforced on-chain from the next execution onward.", tone: "ok" });
-    } catch (e: any) {
-      showToast({ title: "Couldn't update guards", sub: cleanErr(e), tone: "err" });
-    } finally {
-      setBusy(null);
-    }
-  };
+  const doSavePolicy = (next: Policy) =>
+    proposeRule({ kind: "SetPolicy", policy: next }, "policy", "The guards would change");
 
-  const doAllowRecipient = async (target: string, allow: boolean) => {
-    const w = requireWallet();
-    if (!w) return;
-    setBusy(`allow-${target}`);
-    try {
-      await (allow ? allowRecipient : revokeRecipient)(vaultAddress, w, target);
-      refreshSoon();
-      showToast({
-        title: allow ? "Recipient allowed" : "Recipient revoked",
-        sub: allow ? "Funds may now go to this address." : "Pending proposals to this address can no longer execute.",
-        tone: "ok",
-      });
-    } catch (e: any) {
-      showToast({ title: "Allowlist update failed", sub: cleanErr(e), tone: "err" });
-    } finally {
-      setBusy(null);
-    }
-  };
+  const doAllowRecipient = (target: string, allow: boolean) =>
+    proposeRule(
+      allow ? { kind: "AllowRecipient", target } : { kind: "RevokeRecipient", target },
+      `allow-${target}`,
+      allow ? "Funds would be allowed to this address" : "Payments to this address would stop"
+    );
 
   /**
    * Derive this signer's leaf and show it. Only the key holder can compute it,
@@ -665,16 +654,24 @@ export default function Page() {
     try {
       const vId = await secretFromSeed(vaultAddress);
       const root = await rootOf(leaves);
-      await setSignerCommitments(vaultAddress, w, leaves);
-      await setZkConfigTx(vaultAddress, w, CONFIG.groth16VerifierId, vId, root);
+      // Two proposals, because they are two changes. Both must pass before
+      // verification is on: the leaves without the root prove nothing, and the
+      // root without the leaves leaves nobody able to build a path.
+      const a = await proposeAdmin(vaultAddress, w, { kind: "SetSignerCommitments", commitments: leaves });
+      const b = await proposeAdmin(vaultAddress, w, {
+        kind: "SetZkConfig",
+        verifier: CONFIG.groth16VerifierId,
+        vaultId: vId,
+        signerRoot: root,
+      });
       refreshSoon();
       showToast({
-        title: `Signer set published · ${leaves.length} members`,
-        sub: "Approvals are now verified on-chain, and the order reveals nothing.",
+        title: `Signer set proposed · #${a.returnValue} and #${b.returnValue}`,
+        sub: `${leaves.length} members, shuffled. Approve both and verification turns on.`,
         tone: "ok",
       });
     } catch (e: any) {
-      showToast({ title: "Couldn't publish the signer set", sub: cleanErr(e), tone: "err" });
+      showToast({ title: "Couldn't propose the signer set", sub: cleanErr(e), tone: "err" });
     } finally {
       setBusy(null);
     }
@@ -689,7 +686,7 @@ export default function Page() {
       {isApp && (
         <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} submitCall={submitCall} wallet={wallet}
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls}
+          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} admins={admins}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
           onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
@@ -956,7 +953,7 @@ type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
   submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; submitCall: (contract: string, fn: string, args: CallArg[]) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
   onToast: (t: ToastMsg) => void;
@@ -1007,7 +1004,7 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
@@ -1435,9 +1432,9 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
   const threshold = config?.threshold ?? 2;
@@ -1511,8 +1508,12 @@ function VaultDetail({ go, vaultAddress, config, balance, proposals, loading, bu
                 p, threshold, busy,
                 st: statuses[p.id],
                 call: calls[p.id],
+                admin: admins[p.id],
                 blocker: executeBlocker(p, statuses[p.id], policy, balance),
-                canCancel: !!wallet && (wallet === p.proposer || wallet === config?.owner),
+                // proposer only: the owner's veto went with their other unilateral
+                // powers — one key must not be able to kill the proposal that
+                // takes those powers away
+                canCancel: !!wallet && wallet === p.proposer,
                 onCancel,
                 iApproved: didApprove(vaultAddress, p.id, wallet),
               };
@@ -1653,10 +1654,10 @@ function ApprovalDots({ count, threshold, gold }: { count: number; threshold: nu
 
 type TxCardProps = {
   p: Proposal; threshold: number; busy: string | null; iApproved: boolean;
-  st?: ProposalStatus; call?: CallSpec; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
+  st?: ProposalStatus; call?: CallSpec; admin?: AdminAction; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
 };
 
-function TransparentTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1664,15 +1665,24 @@ function TransparentTx({ p, threshold, busy, iApproved, st, call, blocker, canCa
     <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#C9A86A" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{admin ? <RuleBadge /> : call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>proposal #{p.id}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
-        {call
-          ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
-          : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+        {admin ? (
+          <div style={{ gridColumn: "span 2" }}>
+            <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Change</div>
+            <div style={{ fontSize: 14, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
+          </div>
+        ) : (
+          <>
+            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+            {call
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+              : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+          </>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
         {p.executed
@@ -1696,6 +1706,11 @@ function TransparentTx({ p, threshold, busy, iApproved, st, call, blocker, canCa
   );
 }
 
+/** A proposal that changes the vault's own rules rather than moving money. */
+function RuleBadge() {
+  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>RULE</span>;
+}
+
 function CallBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>CALL</span>;
 }
@@ -1704,7 +1719,7 @@ function BatchBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
-function PrivateTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, busy, iApproved, st, call, admin, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled;
@@ -1718,10 +1733,19 @@ function PrivateTx({ p, threshold, busy, iApproved, st, call, blocker, canCancel
       </div>
       <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
-        {call
-          ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
-          : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+        {admin ? (
+          <div style={{ gridColumn: "span 2" }}>
+            <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Change</div>
+            <div style={{ fontSize: 14, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
+          </div>
+        ) : (
+          <>
+            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+            {call
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+              : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+          </>
+        )}
       </div>
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
@@ -2021,7 +2045,9 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
   onUpgrade: () => void;
   onSave: (p: Policy) => void; onAllowRecipient: (target: string, allow: boolean) => void; onRegisterKey: () => void; onPublishSignerSet: (raw: string) => void; myLeaf: bigint | null; commitments: bigint[]; onAllowContract: (contract: string, allow: boolean) => void;
 }) {
-  const isOwner = !!wallet && wallet === config?.owner;
+  // Governance moved from the owner to the threshold, so the question this
+  // screen asks is no longer "are you the owner" but "may you propose".
+  const isSigner = !!wallet && !!config?.signers?.some((x) => x === wallet);
   const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
   const [cap, setCap] = useState(policy.spending_cap > 0n ? String(xlmFromStroops(policy.spending_cap)) : "");
   const [window, setWindow] = useState(policy.cap_window_ledgers || 17280);
@@ -2075,12 +2101,15 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
       <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
       <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Guards</h1>
       <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
-        Rules the contract enforces on every execution — on top of the m-of-n threshold. This is what a smart-contract vault can do that native multi-sig can't.
+        Rules the contract enforces on every execution — on top of the m-of-n threshold. This is what a smart-contract vault can do that native multi-sig can&apos;t.
+      </p>
+      <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
+        Changing any of them is a proposal, approved at the same threshold as a payment. No single key — the owner&apos;s included — can move a guard, the signer set, or the vault&apos;s own code.
       </p>
 
-      {!isOwner && (
+      {!isSigner && (
         <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: 13, color: "#8A857B" }}>
-          Read-only — only the vault owner{config?.owner ? ` (${shortAddr(config.owner)})` : ""} can change guards.
+          Read-only — only this vault's signers can propose a change to its guards.
         </div>
       )}
 
@@ -2101,12 +2130,12 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
             <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
               This vault runs older code than new vaults are created with, so some features are missing or will fail when executed. Upgrading keeps its address, balance, signers and guards exactly as they are.
             </div>
-            {isOwner ? (
+            {isSigner ? (
               <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
-                {busy === "upgrade" ? "Upgrading…" : "Upgrade this vault"}
+                {busy === "upgrade" ? "Proposing…" : "Propose the upgrade"}
               </button>
             ) : (
-              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only the owner can upgrade it.</div>
+              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only a signer can propose the upgrade.</div>
             )}
           </div>
         )
@@ -2115,16 +2144,16 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
       <div style={card}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Per-transaction limit</div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>The largest single execution allowed. Leave empty for no limit. A batch is judged on its total.</p>
-        <input value={maxPerTx} onChange={(e) => setMaxPerTx(e.target.value)} disabled={!isOwner} placeholder="No limit" style={input} />
+        <input value={maxPerTx} onChange={(e) => setMaxPerTx(e.target.value)} disabled={!isSigner} placeholder="No limit" style={input} />
       </div>
 
       <div style={card}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Spending cap</div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A rolling budget: total executed within one window can't exceed this. Empty = uncapped.</p>
-        <input value={cap} onChange={(e) => setCap(e.target.value)} disabled={!isOwner} placeholder="Uncapped" style={{ ...input, marginBottom: 14 }} />
+        <input value={cap} onChange={(e) => setCap(e.target.value)} disabled={!isSigner} placeholder="Uncapped" style={{ ...input, marginBottom: 14 }} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CAP_WINDOWS.map(([label, v]) => (
-            <button key={label} onClick={() => isOwner && setWindow(v)} disabled={!isOwner} style={chip(window === v)}>{label}</button>
+            <button key={label} onClick={() => isSigner && setWindow(v)} disabled={!isSigner} style={chip(window === v)}>{label}</button>
           ))}
         </div>
         {policy.spending_cap > 0n && <CapMeter spent={spent} cap={policy.spending_cap} />}
@@ -2135,7 +2164,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A cooling-off period between proposing and executing — the window in which co-signers can cancel a bad transaction.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {TIMELOCK_PRESETS.map(([label, v]) => (
-            <button key={label} onClick={() => isOwner && setTimelock(v)} disabled={!isOwner} style={chip(timelock === v)}>{label}</button>
+            <button key={label} onClick={() => isSigner && setTimelock(v)} disabled={!isSigner} style={chip(timelock === v)}>{label}</button>
           ))}
         </div>
       </div>
@@ -2143,7 +2172,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <div style={{ fontWeight: 600, fontSize: 15 }}>Recipient allowlist</div>
-          <button onClick={() => isOwner && setAllowlistOnly(!allowlistOnly)} disabled={!isOwner} style={chip(allowlistOnly)}>{allowlistOnly ? "On" : "Off"}</button>
+          <button onClick={() => isSigner && setAllowlistOnly(!allowlistOnly)} disabled={!isSigner} style={chip(allowlistOnly)}>{allowlistOnly ? "On" : "Off"}</button>
         </div>
         <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16 }}>When on, funds can only go to addresses on this list — proposals to anyone else are refused at propose time and again at execute.</p>
 
@@ -2151,7 +2180,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           {allowed.map((a) => (
             <div key={a} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
               <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(a, 8, 6)}</span>
-              {isOwner && (
+              {isSigner && (
                 <button onClick={() => onAllowRecipient(a, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
               )}
             </div>
@@ -2159,7 +2188,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           {!allowed.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>No recipients allowed yet — turning the allowlist on now would block every payment.</div>}
         </div>
 
-        {isOwner && (
+        {isSigner && (
           <div style={{ display: "flex", gap: 8 }}>
             <input value={newRecipient} onChange={(e) => setNewRecipient(e.target.value)} placeholder="G…" style={{ ...input, flex: 1 }} />
             <button
@@ -2182,7 +2211,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           {allowedContracts.map((c) => (
             <div key={c} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
               <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(c, 8, 6)}</span>
-              {isOwner && (
+              {isSigner && (
                 <button onClick={() => onAllowContract(c, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
               )}
             </div>
@@ -2190,7 +2219,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
           {!allowedContracts.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>None — this vault cannot call any contract.</div>}
         </div>
 
-        {isOwner && (
+        {isSigner && (
           <>
             <div style={{ display: "flex", gap: 8 }}>
               <input value={newCallee} onChange={(e) => setNewCallee(e.target.value)} placeholder="C…" style={{ ...input, flex: 1 }} />
@@ -2251,7 +2280,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
         )}
       </div>
 
-      {isOwner && (
+      {isSigner && (
         <div style={card}>
           <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Publish the signer set</div>
           <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
@@ -2278,7 +2307,7 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
         </div>
       )}
 
-      {isOwner && (
+      {isSigner && (
         <>
           {parseError && <div style={{ fontSize: 13, color: "#C45D4A", marginBottom: 12 }}>{parseError}</div>}
           <button
@@ -2287,9 +2316,10 @@ function Guards({ go, wallet, config, policy, allowed, spent, busy, zkConfig, al
             className="h-goldbtn"
             style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: dirty ? "pointer" : "not-allowed", opacity: dirty && !parseError ? 1 : 0.45 }}
           >
-            {busy === "policy" ? "Saving · check Freighter…" : dirty ? "Save guards · sign with wallet" : "No changes to save"}
+            {busy === "policy" ? "Proposing · check Freighter…" : dirty ? "Propose these guards · sign with wallet" : "No changes to propose"}
           </button>
           <p style={{ fontSize: 11.5, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
+            Nothing changes until the signers approve it and it is executed.<br />
             Guards apply to pending proposals too — tightening a limit can block one that was already approved.
           </p>
         </>

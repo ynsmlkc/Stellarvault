@@ -6,7 +6,7 @@ use soroban_sdk::{
     vec, Address, Bytes, Env, String, U256, Vec,
 };
 
-use crate::{BatchItem, Error, Policy, VaultInstance, VaultInstanceClient, ZKApproval};
+use crate::{AdminAction, BatchItem, Error, Policy, VaultInstance, VaultInstanceClient, ZKApproval, ZkConfig};
 
 struct Setup<'a> {
     env: Env,
@@ -24,7 +24,19 @@ impl Setup<'_> {
     }
     /// A permissive policy with one guard dialled in.
     fn set_policy(&self, p: Policy) {
-        self.vault.set_policy(&p);
+        self.admin(AdminAction::SetPolicy(p));
+    }
+
+    /// Push a configuration change through the full lifecycle — propose,
+    /// approve to threshold, execute. There is no shortcut any more, so the
+    /// tests take the same road the UI does.
+    fn admin(&self, action: AdminAction) {
+        let tx = self.vault.propose_admin(&self.signer(0), &action);
+        let t = self.vault.get_config().threshold;
+        for i in 0..t {
+            self.vault.approve(&tx, &self.signer(i));
+        }
+        self.vault.execute(&tx, &self.signer(0));
     }
 }
 
@@ -87,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 4);
+    assert_eq!(s.vault.version(), 5);
 }
 
 #[test]
@@ -234,14 +246,17 @@ fn test_cancel_marks_cancelled_not_executed() {
 }
 
 #[test]
-fn test_owner_can_cancel_others_proposal_but_stranger_cannot() {
+fn test_only_the_proposer_can_cancel() {
     let s = setup(2);
     let tx = s.vault.propose(&s.signer(1), &Address::generate(&s.env), &10, &false);
-    assert_eq!(
-        s.vault.try_cancel(&tx, &s.signer(2)),
-        Err(Ok(Error::NotProposer))
-    );
-    s.vault.cancel(&tx, &s.owner);
+
+    // Not another signer, and — the change — not the owner either. A cancel
+    // right held by one key is a veto over every proposal, including the admin
+    // action that would take that key's powers away.
+    assert_eq!(s.vault.try_cancel(&tx, &s.signer(2)), Err(Ok(Error::NotProposer)));
+    assert_eq!(s.vault.try_cancel(&tx, &s.owner), Err(Ok(Error::NotProposer)));
+
+    s.vault.cancel(&tx, &s.signer(1));
     assert!(s.vault.is_cancelled(&tx));
 }
 
@@ -349,8 +364,8 @@ fn test_allowlist_only_restricts_recipients() {
     let good = Address::generate(&s.env);
     let bad = Address::generate(&s.env);
 
-    s.vault.allow_recipient(&good);
-    s.vault.allow_recipient(&good); // idempotent
+    s.admin(AdminAction::AllowRecipient(good.clone()));
+    s.admin(AdminAction::AllowRecipient(good.clone())); // idempotent
     assert_eq!(s.vault.get_allowed().len(), 1);
     s.set_policy(Policy { allowlist_only: true, ..open_policy() });
 
@@ -370,13 +385,13 @@ fn test_revoking_a_recipient_blocks_a_pending_proposal() {
     let s = setup(1);
     s.token_admin.mint(&s.vault_addr, &10_000);
     let target = Address::generate(&s.env);
-    s.vault.allow_recipient(&target);
+    s.admin(AdminAction::AllowRecipient(target.clone()));
     s.set_policy(Policy { allowlist_only: true, ..open_policy() });
 
     let tx = s.vault.propose(&s.signer(0), &target, &100, &false);
     s.vault.approve(&tx, &s.signer(0));
 
-    s.vault.revoke_recipient(&target);
+    s.admin(AdminAction::RevokeRecipient(target.clone()));
     assert_eq!(
         s.vault.try_execute(&tx, &s.signer(0)),
         Err(Ok(Error::RecipientNotAllowed))
@@ -433,7 +448,7 @@ fn test_batch_total_cannot_bypass_max_per_tx() {
 fn test_batch_respects_allowlist_and_rejects_empty() {
     let s = setup(1);
     let allowed = Address::generate(&s.env);
-    s.vault.allow_recipient(&allowed);
+    s.admin(AdminAction::AllowRecipient(allowed.clone()));
     s.set_policy(Policy { allowlist_only: true, ..open_policy() });
 
     let mixed = vec![
@@ -458,17 +473,17 @@ fn test_batch_respects_allowlist_and_rejects_empty() {
 fn test_duplicate_and_unknown_signer_rejected() {
     let s = setup(2);
     assert_eq!(
-        s.vault.try_add_signer(&s.signer(1)),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::AddSigner(s.signer(1).clone())),
         Err(Ok(Error::DuplicateSigner))
     );
     assert_eq!(
-        s.vault.try_remove_signer(&Address::generate(&s.env)),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::RemoveSigner(Address::generate(&s.env))),
         Err(Ok(Error::SignerNotFound))
     );
     // removing down to below the threshold is refused
-    s.vault.remove_signer(&s.signer(2));
+    s.admin(AdminAction::RemoveSigner(s.signer(2).clone()));
     assert_eq!(
-        s.vault.try_remove_signer(&s.signer(1)),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::RemoveSigner(s.signer(1).clone())),
         Err(Ok(Error::BadThreshold))
     );
 }
@@ -495,7 +510,7 @@ fn test_unset_policy_is_fully_permissive() {
 fn test_negative_policy_rejected() {
     let s = setup(1);
     assert_eq!(
-        s.vault.try_set_policy(&Policy { max_per_tx: -1, ..open_policy() }),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::SetPolicy(Policy { max_per_tx: -1, ..open_policy() })),
         Err(Ok(Error::InvalidPolicy))
     );
 }
@@ -530,11 +545,11 @@ const SIGNER_ROOT: u32 = 0xB007;
 /// approval whose public inputs match what the vault will demand.
 fn with_verifier(s: &Setup, accept: bool) {
     let v = s.env.register(MockVerifier, (accept,));
-    s.vault.set_zk_config(
-        &v,
-        &U256::from_u32(&s.env, VAULT_ID),
-        &U256::from_u32(&s.env, SIGNER_ROOT),
-    );
+    s.admin(AdminAction::SetZkConfig(ZkConfig {
+        verifier: v,
+        vault_id: U256::from_u32(&s.env, VAULT_ID),
+        signer_root: U256::from_u32(&s.env, SIGNER_ROOT),
+    }));
 }
 
 /// A well-formed approval: 256-byte proof, the four public inputs the vault
@@ -742,7 +757,7 @@ fn test_call_requires_an_allowlisted_target() {
 fn test_allowed_call_executes_as_the_vault() {
     let s = setup(1);
     let c = callee(&s);
-    s.vault.allow_contract(&c);
+    s.admin(AdminAction::AllowContract(c.clone()));
 
     let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 5u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     let spec = s.vault.get_call(&tx).unwrap();
@@ -763,7 +778,7 @@ fn test_allowed_call_executes_as_the_vault() {
 fn test_vault_can_never_call_itself() {
     let s = setup(1);
     assert_eq!(
-        s.vault.try_allow_contract(&s.vault_addr),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::AllowContract(s.vault_addr.clone())),
         Err(Ok(Error::SelfCallForbidden))
     );
     assert_eq!(
@@ -776,11 +791,11 @@ fn test_vault_can_never_call_itself() {
 fn test_revoking_a_target_blocks_a_pending_call() {
     let s = setup(1);
     let c = callee(&s);
-    s.vault.allow_contract(&c);
+    s.admin(AdminAction::AllowContract(c.clone()));
     let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     s.vault.approve(&tx, &s.signer(0));
 
-    s.vault.revoke_contract(&c);
+    s.admin(AdminAction::RevokeContract(c.clone()));
     assert_eq!(
         s.vault.try_execute(&tx, &s.signer(0)),
         Err(Ok(Error::ContractNotAllowed))
@@ -792,7 +807,7 @@ fn test_revoking_a_target_blocks_a_pending_call() {
 fn test_call_still_needs_the_threshold_and_respects_the_timelock() {
     let s = setup(2);
     let c = callee(&s);
-    s.vault.allow_contract(&c);
+    s.admin(AdminAction::AllowContract(c.clone()));
     s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
 
     s.env.ledger().set_sequence_number(200);
@@ -813,7 +828,7 @@ fn test_call_still_needs_the_threshold_and_respects_the_timelock() {
 fn test_call_proposal_can_be_cancelled_and_not_replayed() {
     let s = setup(1);
     let c = callee(&s);
-    s.vault.allow_contract(&c);
+    s.admin(AdminAction::AllowContract(c.clone()));
     let tx = s.vault.propose_call(&s.signer(0), &c, &symbol_short!("bump"), &vec![&s.env, 1u32.into_val(&s.env)], &Vec::new(&s.env), &false);
     s.vault.cancel(&tx, &s.signer(0));
     assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::AlreadyCancelled)));
@@ -836,7 +851,7 @@ fn test_call_moves_a_token_the_vault_was_not_created_with() {
     let other_token = TokenClient::new(&s.env, &other.address());
     StellarAssetClient::new(&s.env, &other.address()).mint(&s.vault_addr, &1_000);
 
-    s.vault.allow_contract(&other.address());
+    s.admin(AdminAction::AllowContract(other.address().clone()));
     let recipient = Address::generate(&s.env);
     let tx = s.vault.propose_call(
         &s.signer(0),
@@ -939,7 +954,7 @@ fn test_nested_call_needs_explicit_authorisation() {
     let s = setup(1);
     s.token_admin.mint(&s.vault_addr, &1_000);
     let puller = s.env.register(Puller, ());
-    s.vault.allow_contract(&puller);
+    s.admin(AdminAction::AllowContract(puller.clone()));
 
     let args = vec![
         &s.env,
@@ -960,8 +975,8 @@ fn test_nested_call_succeeds_when_authorised() {
     let s = setup(1);
     s.token_admin.mint(&s.vault_addr, &1_000);
     let puller = s.env.register(Puller, ());
-    s.vault.allow_contract(&puller);
-    s.vault.allow_contract(&s.token.address); // the sub-call target, too
+    s.admin(AdminAction::AllowContract(puller.clone()));
+    s.admin(AdminAction::AllowContract(s.token.address.clone())); // the sub-call target, too
 
     let args = vec![
         &s.env,
@@ -997,7 +1012,7 @@ fn test_nested_call_succeeds_when_authorised() {
 fn test_auth_target_must_be_allowlisted() {
     let s = setup(1);
     let puller = s.env.register(Puller, ());
-    s.vault.allow_contract(&puller); // but NOT the token
+    s.admin(AdminAction::AllowContract(puller.clone())); // but NOT the token
 
     let auth = vec![
         &s.env,
@@ -1052,7 +1067,7 @@ impl Reenterer {
 fn test_callee_cannot_re_enter_the_vault() {
     let s = setup(1);
     let r = s.env.register(Reenterer, ());
-    s.vault.allow_contract(&r);
+    s.admin(AdminAction::AllowContract(r.clone()));
 
     let args = vec![&s.env, s.vault_addr.into_val(&s.env), 0u64.into_val(&s.env)];
     let tx = s.vault.propose_call(&s.signer(0), &r, &symbol_short!("go"), &args, &Vec::new(&s.env), &false);
@@ -1068,7 +1083,7 @@ fn test_callee_cannot_re_enter_the_vault() {
 fn test_even_a_read_back_into_the_vault_is_refused() {
     let s = setup(1);
     let r = s.env.register(Reenterer, ());
-    s.vault.allow_contract(&r);
+    s.admin(AdminAction::AllowContract(r.clone()));
 
     let args = vec![&s.env, s.vault_addr.into_val(&s.env)];
     let tx = s.vault.propose_call(&s.signer(0), &r, &symbol_short!("peek"), &args, &Vec::new(&s.env), &false);
@@ -1077,13 +1092,131 @@ fn test_even_a_read_back_into_the_vault_is_refused() {
     assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err());
 }
 
+/* ================= governance ================= */
+
+/// The reason this exists: before, the owner alone could set the threshold to
+/// 1, remove every other signer and spend the vault dry. Now the same change
+/// costs the same threshold as spending does.
+#[test]
+fn test_lowering_the_threshold_needs_the_threshold() {
+    let s = setup(2);
+
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::SetThreshold(1));
+    s.vault.approve(&tx, &s.signer(0));
+
+    // one approval short — exactly where a unilateral owner used to succeed
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::ThresholdNotMet)));
+    assert_eq!(s.vault.get_config().threshold, 2);
+
+    s.vault.approve(&tx, &s.signer(1));
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.vault.get_config().threshold, 1);
+}
+
+/// Non-signers cannot even open the question.
+#[test]
+fn test_a_stranger_cannot_propose_a_rule_change() {
+    let s = setup(2);
+    let outsider = Address::generate(&s.env);
+    assert_eq!(
+        s.vault.try_propose_admin(&outsider, &AdminAction::SetThreshold(1)),
+        Err(Ok(Error::NotSigner))
+    );
+}
+
+/// Code replacement is the heaviest action of all — it can redefine every other
+/// rule — so it goes the same road as everything else.
+#[test]
+fn test_upgrade_is_a_proposal_like_any_other() {
+    let s = setup(2);
+    let tx = s.vault.propose_admin(
+        &s.signer(0),
+        &AdminAction::Upgrade(BytesN::from_array(&s.env, &[7u8; 32])),
+    );
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ThresholdNotMet)),
+        "one key must not be able to swap the contract's code"
+    );
+}
+
+/// Rule changes wait out the time-lock too. A signer set that could land the
+/// instant it reached the threshold would give the co-signers no window to
+/// notice and react.
+#[test]
+fn test_a_rule_change_respects_the_timelock() {
+    let s = setup(2);
+    s.set_policy(Policy { timelock_ledgers: 10, ..open_policy() });
+
+    let newcomer = Address::generate(&s.env);
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::AddSigner(newcomer.clone()));
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve(&tx, &s.signer(1));
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::TimelockActive)));
+
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 11);
+    s.vault.execute(&tx, &s.signer(0));
+    assert!(s.vault.is_signer(&newcomer));
+}
+
+/// State moves between proposing and executing, so the checks run twice: a
+/// removal that was legal when proposed must not land once it would leave the
+/// vault with fewer signers than its threshold.
+#[test]
+fn test_a_rule_change_is_rechecked_at_execution() {
+    let s = setup(1);
+
+    // legal at proposal time: signer(2) is a signer
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::RemoveSigner(s.signer(2)));
+    s.vault.approve(&tx, &s.signer(0));
+
+    // meanwhile a second proposal removes them first
+    s.admin(AdminAction::RemoveSigner(s.signer(2)));
+    assert!(!s.vault.is_signer(&s.signer(2)));
+
+    // the first is now stale, and says so rather than quietly doing nothing
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::SignerNotFound)));
+    assert_eq!(s.vault.get_config().signer_count, 2, "and nothing else moved");
+}
+
+/// An admin proposal moves no funds, so the amount guards must not apply to it —
+/// otherwise a tight per-transaction limit would lock governance out entirely.
+#[test]
+fn test_a_rule_change_is_not_blocked_by_the_spending_guards() {
+    let s = setup(1);
+    s.set_policy(Policy { max_per_tx: 1, allowlist_only: true, ..open_policy() });
+
+    let target = Address::generate(&s.env);
+    s.admin(AdminAction::AllowRecipient(target.clone()));
+    assert_eq!(s.vault.get_allowed().len(), 1);
+}
+
+/// Raising the threshold invalidates proposals that had already met the old
+/// one. They are not cancelled — they simply need the approvals the vault now
+/// asks for, which is what makes the new rule take effect immediately.
+#[test]
+fn test_raising_the_threshold_holds_back_already_approved_proposals() {
+    let s = setup(2);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve(&tx, &s.signer(1));
+
+    s.admin(AdminAction::SetThreshold(3));
+
+    assert_eq!(s.vault.try_execute(&tx, &s.signer(0)), Err(Ok(Error::ThresholdNotMet)));
+    s.vault.approve(&tx, &s.signer(2));
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    s.vault.execute(&tx, &s.signer(0));
+}
+
 /* ================= ownership ================= */
 
 #[test]
 fn test_transfer_ownership_moves_the_role() {
     let s = setup(1);
     let next = Address::generate(&s.env);
-    s.vault.transfer_ownership(&next);
+    s.admin(AdminAction::TransferOwnership(next.clone()));
 
     assert_eq!(s.vault.get_config().owner, next);
 }
@@ -1092,7 +1225,7 @@ fn test_transfer_ownership_moves_the_role() {
 fn test_transfer_ownership_rejects_the_current_owner() {
     let s = setup(1);
     assert_eq!(
-        s.vault.try_transfer_ownership(&s.owner),
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::TransferOwnership(s.owner.clone())),
         Err(Ok(Error::SameOwner)),
         "handing the role to whoever already holds it is a no-op worth catching"
     );
@@ -1104,10 +1237,10 @@ fn test_transfer_ownership_rejects_the_current_owner() {
 fn test_new_owner_can_administer() {
     let s = setup(1);
     let next = Address::generate(&s.env);
-    s.vault.transfer_ownership(&next);
+    s.admin(AdminAction::TransferOwnership(next.clone()));
 
     let target = Address::generate(&s.env);
-    s.vault.allow_recipient(&target);
+    s.admin(AdminAction::AllowRecipient(target.clone()));
     assert_eq!(s.vault.get_allowed().len(), 1);
     assert_eq!(s.vault.get_config().owner, next, "and it did not drift back");
 }

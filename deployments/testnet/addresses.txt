@@ -201,3 +201,21 @@ listed by the new factory. `remember_vault` re-adopts any of them.
 
   The three v1 vaults have no `upgrade` entry point and can never run current
   code. The rest can be upgraded from Guards.
+
+--- 2026-08-09 · vault-instance v5 (governance by proposal) ---
+wasm hash    51e54c38d314fb9548d8739a42df1873aba0a3af6c92c07934d893adf0860aa0
+factory      CA3VDWIXCP4THSE7HTYAGTYGY257USCN2WYC2JOI7C3IUVZKPV4JXTAW  (set_wasm -> above)
+test vault   CC6LDYVGDJ5SCMCJYWOZQOQWHFLFODME3M2JX7FK7ZVZFO7GHFZAE6D6  (2-of-3)
+
+What changed: there is no longer an owner-only entry point to any rule. The
+threshold, signer set, policy, allowlists, verifier config, ownership and the
+contract's own code all move through propose -> approve -> execute.
+
+Verified live on the test vault above:
+  propose_admin SetThreshold(1), 1 of 2 approvals -> execute = Error(Contract, #10)
+                                                     threshold still 2
+                                2 of 2 approvals -> execute = ok, threshold 1
+
+Existing v4 vaults keep owner-only governance until they upgrade. Their owner
+can still call `upgrade` (that is v4 code); once on v5 that power is gone and a
+further upgrade needs the threshold.

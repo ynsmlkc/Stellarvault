@@ -6,13 +6,21 @@
 //! (`token.balance(self)`), so per-vault balance is free and depositing is just
 //! a plain transfer to this contract's address. Deployed by `vault-factory`.
 //!
+//! # Governance
+//!
+//! Every rule the vault runs on — threshold, signer set, policy, allowlists,
+//! verifier config, ownership, and the contract's own code — changes only
+//! through [`AdminAction`], proposed and approved like any payment. There is no
+//! owner-only entry point to any of it, so the vault is m-of-n for changing the
+//! rules as well as for spending under them.
+//!
 //! # Guards (Safe-style policy)
 //!
-//! An owner-configurable [`Policy`] is enforced on every execution:
+//! A [`Policy`] is enforced on every execution:
 //! per-transaction limit, rolling spending cap, time-lock and a recipient
 //! allowlist. A vault with no policy set behaves exactly as before (all guards
 //! disabled), so upgrading an existing vault never changes its behaviour until
-//! the owner opts in.
+//! the signers opt in.
 //!
 //! # Compatibility
 //!
@@ -47,7 +55,8 @@ const COMMITS: Symbol = symbol_short!("commits");
 ///   2 — guards, batch, cancellation, typed errors
 ///   3 — on-chain proof verification + arbitrary contract calls
 ///   4 — signature-derived signer keys + anonymous (unauthenticated) approval
-const VERSION: u32 = 4;
+///   5 — governance by proposal: no owner-only path to any rule change
+const VERSION: u32 = 5;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -134,6 +143,8 @@ pub enum DataKey {
     Call(u64),
     /// Sub-invocations the vault pre-authorises for a call proposal.
     CallAuth(u64),
+    /// The configuration change a proposal applies, when it is an admin action.
+    Admin(u64),
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -167,6 +178,36 @@ pub struct ProposalStatus {
     pub is_batch: bool,
     /// Total amount the proposal moves.
     pub amount: i128,
+}
+
+/// A change to the vault's own configuration, made by proposal.
+///
+/// Everything here used to be a direct owner call, which made the vault m-of-n
+/// for spending and 1-of-1 for governance: one key could lower the threshold to
+/// one, or swap the contract's code, and every guard sat behind it. These go
+/// through propose -> approve -> execute like any payment, so changing the rules
+/// costs the same threshold as spending under them.
+///
+/// Safe does this by having the multi-sig call *itself*. Soroban forbids that —
+/// a contract already on the call stack cannot be re-entered, even for a read —
+/// so the action is data the vault applies to itself internally instead.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdminAction {
+    SetThreshold(u32),
+    AddSigner(Address),
+    RemoveSigner(Address),
+    SetPolicy(Policy),
+    AllowRecipient(Address),
+    RevokeRecipient(Address),
+    AllowContract(Address),
+    RevokeContract(Address),
+    SetZkConfig(ZkConfig),
+    SetSignerCommitments(Vec<U256>),
+    TransferOwnership(Address),
+    /// Replaces the contract's code. The heaviest of these by far — it can
+    /// redefine every other rule — so it is only reachable this way.
+    Upgrade(BytesN<32>),
 }
 
 /// One transfer inside a batch (multi-call) proposal.
@@ -284,6 +325,14 @@ pub struct ExecutedEvent {
 pub struct CancelledEvent {
     #[topic] pub tx_id: u64,
     pub cancelled_by: Address,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct AdminExecutedEvent {
+    #[topic] pub tx_id: u64,
+    #[topic] pub executed_by: Address,
+    pub action: AdminAction,
 }
 
 #[contractevent]
@@ -479,6 +528,33 @@ impl VaultInstance {
     }
 
     /// Transparent approval — identity visible.
+    /// Propose a change to the vault's own rules.
+    ///
+    /// Same lifecycle as a payment — any signer proposes, the threshold
+    /// approves, anyone executes — and the time-lock applies, so a signer set
+    /// or a code swap cannot land the instant it reaches the threshold. The
+    /// amount guards do not: an admin action moves nothing.
+    pub fn propose_admin(env: Env, proposer: Address, action: AdminAction) -> Result<u64, Error> {
+        proposer.require_auth();
+        Self::require_signer(&env, &proposer)?;
+        // Rejected here as well as at execution, so a proposal that could never
+        // land does not sit in the list collecting approvals.
+        Self::check_admin(&env, &action)?;
+
+        // target = the vault itself. `Proposal` has no room for a third shape
+        // without breaking v1 byte compatibility, so the action lives under its
+        // own key and the proposal records a zero-amount transfer to self.
+        let tx_id = Self::store_proposal(&env, proposer, env.current_contract_address(), 0, false);
+        env.storage().persistent().set(&DataKey::Admin(tx_id), &action);
+        Self::bump_key(&env, &DataKey::Admin(tx_id));
+        Ok(tx_id)
+    }
+
+    /// The configuration change a proposal applies, if it is an admin action.
+    pub fn get_admin(env: Env, tx_id: u64) -> Option<AdminAction> {
+        env.storage().persistent().get(&DataKey::Admin(tx_id))
+    }
+
     pub fn approve(env: Env, tx_id: u64, signer: Address) -> Result<(), Error> {
         Self::bump(&env);
         signer.require_auth();
@@ -597,6 +673,17 @@ impl VaultInstance {
             }
         }
 
+        // An admin action moves nothing, so the amount guards and the recipient
+        // allowlist have nothing to bite on — the time-lock above already
+        // applied, which is the one that matters for a rule change.
+        if let Some(action) = env.storage().persistent().get::<_, AdminAction>(&DataKey::Admin(tx_id)) {
+            p.executed = true;
+            env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
+            Self::apply_admin(&env, &action)?;
+            AdminExecutedEvent { tx_id, action, executed_by: executor }.publish(&env);
+            return Ok(());
+        }
+
         // A contract call moves no amount of its own, so the amount-based
         // guards have nothing to bite on. Its guard is the call allowlist,
         // re-checked here in case the owner revoked the target meanwhile.
@@ -695,8 +782,11 @@ impl VaultInstance {
         Self::bump(&env);
         caller.require_auth();
         let p = Self::proposal(&env, tx_id)?;
-        let owner: Address = env.storage().instance().get(&OWNER).unwrap();
-        if p.proposer != caller && owner != caller {
+        // Proposer only. The owner used to be able to cancel anything, which
+        // meant one key could veto every proposal — including the admin action
+        // that would take that key's powers away. Signers who disagree with a
+        // proposal withhold approval; nobody gets to kill it outright.
+        if p.proposer != caller {
             return Err(Error::NotProposer);
         }
         Self::require_open(&env, tx_id, &p)?;
@@ -713,72 +803,6 @@ impl VaultInstance {
     // ---------------- guards (owner) ----------------
 
     /// Install or replace the spending policy. Zero fields disable that guard.
-    pub fn set_policy(env: Env, policy: Policy) -> Result<(), Error> {
-        let owner = Self::require_owner(&env);
-        if policy.max_per_tx < 0 || policy.spending_cap < 0 {
-            return Err(Error::InvalidPolicy);
-        }
-        env.storage().instance().set(&POLICY, &policy);
-        PolicyUpdatedEvent { by: owner, policy }.publish(&env);
-        Ok(())
-    }
-
-    pub fn allow_recipient(env: Env, target: Address) -> Result<(), Error> {
-        Self::require_owner(&env);
-        let mut list = Self::allowlist(&env);
-        for a in list.iter() {
-            if a == target {
-                return Ok(()); // already allowed — idempotent
-            }
-        }
-        if list.len() as u32 >= MAX_ALLOWED {
-            return Err(Error::AllowlistFull);
-        }
-        list.push_back(target.clone());
-        env.storage().instance().set(&ALLOWED, &list);
-        AllowlistChangedEvent { target, allowed: true }.publish(&env);
-        Ok(())
-    }
-
-    /// Let proposals call `contract`. Nothing outside this list is callable.
-    ///
-    /// The vault itself can never be added: a proposal that could call this
-    /// contract's own admin entry points would be able to lift every guard,
-    /// change the signer set or swap the code — turning one passing proposal
-    /// into total control. That is refused here rather than left to the owner's
-    /// judgement.
-    pub fn allow_contract(env: Env, contract: Address) -> Result<(), Error> {
-        Self::require_owner(&env);
-        if contract == env.current_contract_address() {
-            return Err(Error::SelfCallForbidden);
-        }
-        let mut list = Self::call_allowlist(&env);
-        for a in list.iter() {
-            if a == contract {
-                return Ok(());
-            }
-        }
-        if list.len() as u32 >= MAX_ALLOWED {
-            return Err(Error::CallAllowlistFull);
-        }
-        list.push_back(contract.clone());
-        env.storage().instance().set(&CALLOWED, &list);
-        CallTargetChangedEvent { contract, allowed: true }.publish(&env);
-        Ok(())
-    }
-
-    pub fn revoke_contract(env: Env, contract: Address) {
-        Self::require_owner(&env);
-        let mut next = Vec::new(&env);
-        for a in Self::call_allowlist(&env).iter() {
-            if a != contract {
-                next.push_back(a);
-            }
-        }
-        env.storage().instance().set(&CALLOWED, &next);
-        CallTargetChangedEvent { contract, allowed: false }.publish(&env);
-    }
-
     pub fn get_allowed_contracts(env: Env) -> Vec<Address> {
         Self::call_allowlist(&env)
     }
@@ -788,137 +812,23 @@ impl VaultInstance {
         env.storage().persistent().get(&DataKey::Call(tx_id))
     }
 
-    pub fn revoke_recipient(env: Env, target: Address) {
-        Self::require_owner(&env);
-        let list = Self::allowlist(&env);
-        let mut next = Vec::new(&env);
-        for a in list.iter() {
-            if a != target {
-                next.push_back(a);
-            }
-        }
-        env.storage().instance().set(&ALLOWED, &next);
-        AllowlistChangedEvent { target, allowed: false }.publish(&env);
-    }
-
-    /// Turn on on-chain proof verification for this vault.
-    ///
-    /// `vault_id` and `signer_root` are the field elements the circuit was
-    /// proved against: the domain separator for this vault, and the Merkle root
-    /// of its signer commitments. Pinning them here is what makes a proof
-    /// *this* vault's proof — a valid proof for another vault, or against a
-    /// signer set the owner never published, is refused.
-    ///
-    /// A vault with no config set records nullifiers without verifying, which
-    /// is how every vault deployed before this existed still behaves. That mode
-    /// is weaker on purpose and only for those: `get_zk_config` returning
-    /// `None` is the honest signal that a vault is in it.
-    pub fn set_zk_config(env: Env, verifier: Address, vault_id: U256, signer_root: U256) {
-        let owner = Self::require_owner(&env);
-        let cfg = ZkConfig { verifier, vault_id, signer_root };
-        env.storage().instance().set(&VERIFIER, &cfg);
-        ZkConfigSetEvent { by: owner, config: cfg }.publish(&env);
-    }
-
     /// The verifier and pinned public inputs, or `None` if this vault does not
     /// verify proofs on-chain.
     pub fn get_zk_config(env: Env) -> Option<ZkConfig> {
         env.storage().instance().get(&VERIFIER)
     }
 
-    /// Publish the signer commitments the Merkle tree is built from.
+    /// The signer commitments the Merkle tree is built from.
     ///
     /// A prover needs every leaf to build its membership path, so this list is
     /// necessarily public. What must NOT be public is which leaf belongs to
     /// whom: given that mapping, anyone could compute `Poseidon(leaf, txId)`
     /// for each signer and match it against the nullifier an approval
     /// published — recovering the approver in as many guesses as there are
-    /// signers.
-    ///
-    /// So the owner publishes these **shuffled**, in an order unrelated to the
-    /// signer list. Each signer recognises their own commitment; nobody else
-    /// can attribute any of them.
-    pub fn set_signer_commitments(env: Env, commitments: Vec<U256>) {
-        Self::require_owner(&env);
-        env.storage().instance().set(&COMMITS, &commitments);
-    }
-
+    /// signers. They are published **shuffled**, in an order unrelated to the
+    /// signer list: each signer recognises their own, nobody attributes the rest.
     pub fn get_signer_commitments(env: Env) -> Vec<U256> {
         env.storage().instance().get(&COMMITS).unwrap_or_else(|| Vec::new(&env))
-    }
-
-    // ---------------- admin (owner) ----------------
-
-    pub fn add_signer(env: Env, new_signer: Address) -> Result<(), Error> {
-        Self::require_owner(&env);
-        let mut signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
-        for s in signers.iter() {
-            if s == new_signer {
-                return Err(Error::DuplicateSigner);
-            }
-        }
-        signers.push_back(new_signer);
-        env.storage().instance().set(&SIGNERS, &signers);
-        Ok(())
-    }
-
-    pub fn remove_signer(env: Env, signer: Address) -> Result<(), Error> {
-        Self::require_owner(&env);
-        let signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
-        let mut next = Vec::new(&env);
-        let mut found = false;
-        for s in signers.iter() {
-            if s == signer {
-                found = true;
-            } else {
-                next.push_back(s);
-            }
-        }
-        if !found {
-            return Err(Error::SignerNotFound);
-        }
-        let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
-        if threshold > next.len() as u32 {
-            return Err(Error::BadThreshold);
-        }
-        env.storage().instance().set(&SIGNERS, &next);
-        Ok(())
-    }
-
-    pub fn set_threshold(env: Env, new_threshold: u32) -> Result<(), Error> {
-        Self::require_owner(&env);
-        let signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
-        if new_threshold == 0 || new_threshold > signers.len() as u32 {
-            return Err(Error::BadThreshold);
-        }
-        env.storage().instance().set(&THRESH, &new_threshold);
-        Ok(())
-    }
-
-    /// Hand the owner role to another address.
-    ///
-    /// Without this the role is permanent: an owner who loses that key leaves a
-    /// vault whose signers, threshold and policy can never change again, and
-    /// whose funds are only as movable as the current signer set allows. The new
-    /// owner must authorise too, so the role cannot be pushed onto an address
-    /// that cannot use it — a typo would otherwise be unrecoverable.
-    pub fn transfer_ownership(env: Env, new_owner: Address) -> Result<(), Error> {
-        let old = Self::require_owner(&env);
-        if old == new_owner {
-            return Err(Error::SameOwner);
-        }
-        new_owner.require_auth();
-        env.storage().instance().set(&OWNER, &new_owner);
-        OwnershipTransferredEvent { from: old, to: new_owner }.publish(&env);
-        Ok(())
-    }
-
-    /// Owner-gated code upgrade. Without this an already-deployed vault would be
-    /// frozen on the WASM it was born with — `factory.set_wasm` only affects
-    /// vaults created after it.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        Self::require_owner(&env);
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     // ---------------- queries ----------------
@@ -1055,11 +965,151 @@ impl VaultInstance {
         env.storage().persistent().extend_ttl(key, TTL_LOW, TTL_EXTEND);
     }
 
-    fn require_owner(env: &Env) -> Address {
-        let owner: Address = env.storage().instance().get(&OWNER).unwrap();
-        owner.require_auth();
-        Self::bump(env);
-        owner
+    /// What can be judged about an action before anyone approves it.
+    ///
+    /// Duplicated at execution time rather than trusted from here: the vault's
+    /// state moves between the two, so a threshold that was reachable when
+    /// proposed may not be by the time it passes.
+    fn check_admin(env: &Env, action: &AdminAction) -> Result<(), Error> {
+        match action {
+            AdminAction::SetThreshold(t) => {
+                let signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
+                if *t == 0 || *t > signers.len() as u32 {
+                    return Err(Error::BadThreshold);
+                }
+            }
+            AdminAction::AddSigner(a) => {
+                if Self::is_signer_internal(env, a) {
+                    return Err(Error::DuplicateSigner);
+                }
+            }
+            AdminAction::RemoveSigner(a) => {
+                if !Self::is_signer_internal(env, a) {
+                    return Err(Error::SignerNotFound);
+                }
+                let signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
+                let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
+                if threshold > signers.len() as u32 - 1 {
+                    return Err(Error::BadThreshold);
+                }
+            }
+            AdminAction::SetPolicy(p) => {
+                if p.max_per_tx < 0 || p.spending_cap < 0 {
+                    return Err(Error::InvalidPolicy);
+                }
+            }
+            AdminAction::AllowRecipient(_) => {
+                if Self::allowlist(env).len() as u32 >= MAX_ALLOWED {
+                    return Err(Error::AllowlistFull);
+                }
+            }
+            AdminAction::AllowContract(c) => {
+                // The vault may never be added to its own call allowlist: the
+                // host refuses re-entry anyway, so such a proposal could only
+                // ever fail — and naming it here says why.
+                if *c == env.current_contract_address() {
+                    return Err(Error::SelfCallForbidden);
+                }
+                if Self::call_allowlist(env).len() as u32 >= MAX_ALLOWED {
+                    return Err(Error::CallAllowlistFull);
+                }
+            }
+            AdminAction::TransferOwnership(a) => {
+                let owner: Address = env.storage().instance().get(&OWNER).unwrap();
+                if owner == *a {
+                    return Err(Error::SameOwner);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Apply a passed action. Reached only from `execute`, which is reached only
+    /// by a proposal that met the threshold — there is no other caller, and no
+    /// public entry point for any of this.
+    fn apply_admin(env: &Env, action: &AdminAction) -> Result<(), Error> {
+        Self::check_admin(env, action)?;
+        let s = env.storage().instance();
+        match action {
+            AdminAction::SetThreshold(t) => s.set(&THRESH, t),
+            AdminAction::AddSigner(a) => {
+                let mut signers: Vec<Address> = s.get(&SIGNERS).unwrap();
+                signers.push_back(a.clone());
+                s.set(&SIGNERS, &signers);
+            }
+            AdminAction::RemoveSigner(a) => {
+                let mut next = Vec::new(env);
+                for x in s.get::<_, Vec<Address>>(&SIGNERS).unwrap().iter() {
+                    if x != *a {
+                        next.push_back(x);
+                    }
+                }
+                s.set(&SIGNERS, &next);
+            }
+            AdminAction::SetPolicy(p) => {
+                s.set(&POLICY, p);
+                PolicyUpdatedEvent { by: env.current_contract_address(), policy: p.clone() }
+                    .publish(env);
+            }
+            AdminAction::AllowRecipient(t) => {
+                let mut list = Self::allowlist(env);
+                for a in list.iter() {
+                    if a == *t {
+                        return Ok(()); // idempotent
+                    }
+                }
+                list.push_back(t.clone());
+                s.set(&ALLOWED, &list);
+                AllowlistChangedEvent { target: t.clone(), allowed: true }.publish(env);
+            }
+            AdminAction::RevokeRecipient(t) => {
+                let mut next = Vec::new(env);
+                for a in Self::allowlist(env).iter() {
+                    if a != *t {
+                        next.push_back(a);
+                    }
+                }
+                s.set(&ALLOWED, &next);
+                AllowlistChangedEvent { target: t.clone(), allowed: false }.publish(env);
+            }
+            AdminAction::AllowContract(c) => {
+                let mut list = Self::call_allowlist(env);
+                for a in list.iter() {
+                    if a == *c {
+                        return Ok(());
+                    }
+                }
+                list.push_back(c.clone());
+                s.set(&CALLOWED, &list);
+                CallTargetChangedEvent { contract: c.clone(), allowed: true }.publish(env);
+            }
+            AdminAction::RevokeContract(c) => {
+                let mut next = Vec::new(env);
+                for a in Self::call_allowlist(env).iter() {
+                    if a != *c {
+                        next.push_back(a);
+                    }
+                }
+                s.set(&CALLOWED, &next);
+                CallTargetChangedEvent { contract: c.clone(), allowed: false }.publish(env);
+            }
+            AdminAction::SetZkConfig(cfg) => {
+                s.set(&VERIFIER, cfg);
+                ZkConfigSetEvent { by: env.current_contract_address(), config: cfg.clone() }
+                    .publish(env);
+            }
+            AdminAction::SetSignerCommitments(c) => s.set(&COMMITS, c),
+            AdminAction::TransferOwnership(a) => {
+                let old: Address = s.get(&OWNER).unwrap();
+                s.set(&OWNER, a);
+                OwnershipTransferredEvent { from: old, to: a.clone() }.publish(env);
+            }
+            AdminAction::Upgrade(hash) => {
+                env.deployer().update_current_contract_wasm(hash.clone());
+            }
+        }
+        Ok(())
     }
 
     fn require_signer(env: &Env, who: &Address) -> Result<(), Error> {

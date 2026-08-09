@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CONFIG, shortAddr, formatXLM, contractExplorerUrl, toStroops, toStroopsSafe } from "@/lib/stellar";
-import { proposeCallRaw, allowContract, getAllowedContracts, describeError, type SubCall } from "@/lib/contract";
+import { proposeCallRaw, proposeAdmin, getAllowedContracts, describeError, type SubCall } from "@/lib/contract";
 import {
   vaultConfidentialKey,
   readConfidentialBalance,
@@ -158,10 +158,22 @@ export default function Confidential({
 
       // The token must be callable; anything it calls back out as the vault
       // must be too, since authorising a sub-call is the larger permission.
+      //
+      // This used to allowlist them silently, on the owner's authority alone.
+      // Widening what the vault may call is a rule change like any other now,
+      // so it is proposed and the operation waits — saying so plainly beats a
+      // confidential proposal that can never execute.
       const allowed = await getAllowedContracts(vaultAddress);
-      const needed = [CONFIG.confidentialTokenId, ...auth.map((a) => a.contract)];
-      for (const c of needed) {
-        if (!allowed.includes(c)) await allowContract(vaultAddress, wallet, c);
+      const missing = [CONFIG.confidentialTokenId, ...auth.map((a) => a.contract)]
+        .filter((c, i, xs) => xs.indexOf(c) === i && !allowed.includes(c));
+      if (missing.length) {
+        for (const c of missing) {
+          await proposeAdmin(vaultAddress, wallet, { kind: "AllowContract", contract: c });
+        }
+        throw new Error(
+          `This vault has to allow ${missing.length === 1 ? "one contract" : `${missing.length} contracts`} first. ` +
+            `Proposed — approve it in the vault, then come back and try again.`
+        );
       }
 
       await proposeCallRaw(vaultAddress, wallet, CONFIG.confidentialTokenId, fn, await build(), auth);
