@@ -38,6 +38,8 @@ import {
   proposeCall,
   proposeAdmin,
   getAdmin,
+  getFactoryWasm,
+  upgradeVaultDirect,
   describeAdmin,
   describeError,
   OPEN_POLICY,
@@ -604,12 +606,43 @@ export default function Page() {
    * is exactly why it needs the threshold rather than one key.
    */
   const doUpgrade = async () => {
-    if (!CONFIG.vaultWasmHash) {
-      showToast({ title: "No target build configured", sub: "NEXT_PUBLIC_VAULT_WASM_HASH is unset.", tone: "err" });
+    const w = requireWallet();
+    if (!w) return;
+
+    // The target comes from the factory, live. It used to come from a build-time
+    // env var, which drifted behind a deploy and upgraded a vault BACKWARDS —
+    // v5 to v4 — because a wrong hash does not fail, it just installs old code.
+    setBusy("upgrade");
+    const hash = await getFactoryWasm();
+    setBusy(null);
+    if (!hash) {
+      showToast({ title: "Cannot read the target build", sub: "The factory did not return a WASM hash.", tone: "err" });
       return;
     }
+    if (hash === CONFIG.vaultWasmHash) {
+      // agreement is the normal case; a mismatch is worth knowing about
+    } else {
+      console.warn(`upgrade target: factory says ${hash}, env says ${CONFIG.vaultWasmHash}`);
+    }
+
+    // Pre-v5 vaults have no propose_admin to route this through: governance was
+    // owner-only then, and the direct call is the only door they have.
+    if ((version ?? 0) < 5) {
+      setBusy("upgrade");
+      try {
+        await upgradeVaultDirect(vaultAddress, w, hash);
+        refreshSoon();
+        showToast({ title: "Vault upgraded", sub: "It now runs the code new vaults are created with.", tone: "ok" });
+      } catch (e: any) {
+        showToast({ title: "Upgrade failed", sub: cleanErr(e), tone: "err" });
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+
     await proposeRule(
-      { kind: "Upgrade", wasmHash: CONFIG.vaultWasmHash },
+      { kind: "Upgrade", wasmHash: hash },
       "upgrade",
       "The vault would run the code new vaults are created with"
     );

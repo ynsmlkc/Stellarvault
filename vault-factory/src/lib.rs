@@ -85,6 +85,17 @@ impl VaultFactory {
         vault
     }
 
+    /// The vault-instance WASM new vaults are born with.
+    ///
+    /// Exists because an existing vault upgrades by naming a hash, and the only
+    /// honest answer to "which one" is this — read from the chain at the moment
+    /// of asking. A build-time copy in the front end drifts silently, and a
+    /// stale one does not fail: it upgrades a vault to whatever it points at,
+    /// which is how a live vault was moved backwards from v5 to v4.
+    pub fn get_wasm(env: Env) -> BytesN<32> {
+        env.storage().instance().get(&WASM).unwrap()
+    }
+
     /// Admin: point the factory at a new vault-instance WASM (future upgrades).
     pub fn set_wasm(env: Env, new_wasm_hash: BytesN<32>) {
         let admin: Address = env.storage().instance().get(&ADMIN).unwrap();

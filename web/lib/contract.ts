@@ -347,6 +347,32 @@ export async function getSpentInWindow(vaultAddr: string): Promise<bigint> {
 }
 
 /** Vault addresses this owner created (factory's on-chain registry). */
+/**
+ * The vault-instance WASM the factory currently serves.
+ *
+ * Read from chain rather than from `CONFIG.vaultWasmHash`, because an upgrade
+ * that names the wrong hash does not fail — it succeeds, onto whatever code
+ * that hash holds. A stale build-time copy moved a live vault from v5 back to
+ * v4 that way. The factory is the one place that definitionally knows.
+ */
+export async function getFactoryWasm(): Promise<string | null> {
+  try {
+    const h = await simulate(CONFIG.factoryId, "get_wasm", []);
+    return h ? Buffer.from(h).toString("hex") : null;
+  } catch {
+    return null; // factory predates the getter
+  }
+}
+
+/**
+ * Direct `upgrade` — the pre-v5 path, where governance was still owner-only.
+ *
+ * Those vaults have no `propose_admin` to route it through, so without this the
+ * app can see that they are behind and offer no way out.
+ */
+export const upgradeVaultDirect = (vaultAddr: string, owner: string, wasmHash: string) =>
+  invoke(vaultAddr, "upgrade", [nativeToScVal(Buffer.from(wasmHash, "hex"), { type: "bytes" })], owner);
+
 export async function getMyVaults(owner: string): Promise<string[]> {
   try {
     const list = await simulate(CONFIG.factoryId, "get_vaults", [addr(owner)]);
@@ -752,6 +778,8 @@ export function describeAdmin(a: AdminAction): string {
     case "SetZkConfig": return "Turn on on-chain proof verification";
     case "SetSignerCommitments": return `Publish ${a.commitments.length} signer commitments`;
     case "TransferOwnership": return `Hand ownership to ${short(a.owner)}`;
-    case "Upgrade": return `Replace the vault's code (${a.wasmHash.slice(0, 8)}…)`;
+    // Full hash, not a prefix: this is the one action that can redefine every
+    // other rule, and a signer approving it has nothing else to check it by.
+    case "Upgrade": return `Replace the vault's code with WASM ${a.wasmHash}`;
   }
 }
