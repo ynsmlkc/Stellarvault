@@ -49,6 +49,33 @@ export function formatXLM(stroops: bigint | number | string): string {
   return `${whole.toLocaleString("en-US")}.${fracStr}`;
 }
 
+/**
+ * Every stroop of it, no grouping — for prefilling an input the user may save
+ * back. `formatXLM` truncates to two decimals, so round-tripping a 1.005 cap
+ * through it would silently rewrite the policy as 1.00. Output is always valid
+ * input to `toStroops`.
+ */
+export function xlmExact(stroops: bigint): string {
+  const neg = stroops < 0n;
+  const v = neg ? -stroops : stroops;
+  const frac = (v % 10_000_000n).toString().padStart(7, "0").replace(/0+$/, "");
+  return `${neg ? "-" : ""}${v / 10_000_000n}${frac ? `.${frac}` : ""}`;
+}
+
+/**
+ * Grouped for reading, but never hides a stroop.
+ *
+ * `formatXLM` cuts at two decimals, which is right for a balance and wrong for
+ * a line item someone is about to approve: a 1-stroop payment renders as
+ * "0.00" and looks like nothing.
+ */
+export function formatXLMExact(stroops: bigint): string {
+  const neg = stroops < 0n;
+  const v = neg ? -stroops : stroops;
+  const frac = (v % 10_000_000n).toString().padStart(7, "0").replace(/0+$/, "").padEnd(2, "0");
+  return `${neg ? "-" : ""}${(v / 10_000_000n).toLocaleString("en-US")}.${frac}`;
+}
+
 export const contractExplorerUrl = (id: string) => `${EXPLORER}/contract/${id}`;
 export const txExplorerUrl = (hash: string) => `${EXPLORER}/tx/${hash}`;
 

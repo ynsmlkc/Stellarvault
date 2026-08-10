@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeError, fieldTo32, proofTo256 } from "./contract";
+import { argLabel, describeError, fieldTo32, proofTo256 } from "./contract";
 
 describe("describeError", () => {
   it("names the guard that fired instead of showing a code", () => {
@@ -55,5 +55,34 @@ describe("proofTo256", () => {
     expect([at(2), at(3)]).toEqual([11, 10]);      // b.x reversed
     expect([at(4), at(5)]).toEqual([21, 20]);      // b.y reversed
     expect([at(6), at(7)]).toEqual([3, 4]);        // c: as-is
+  });
+});
+
+describe("argLabel", () => {
+  // These are the exact three arguments a `transfer` proposal carries, read
+  // back off testnet through `scValToNative`.
+  it("reads out a transfer the way a co-signer has to check it", () => {
+    const [from, to, amount] = [
+      "CBPWDYYIZNSN6MCXSAXMP7O5KNCWMO2FTOW2GNRKBEX4Y6BBRX3Z62OU",
+      "GAV22INZRB3KWAPQODF6MYWY5T3HLIBBFZIQLLXKTUCYUAUHY3KIME26",
+      2_500_000_000n,
+    ].map(argLabel);
+    expect(from.text).toBe("CBPWDY…3Z62OU");
+    expect(from.title).toBe("CBPWDYYIZNSN6MCXSAXMP7O5KNCWMO2FTOW2GNRKBEX4Y6BBRX3Z62OU"); // full one on hover
+    expect(to.text).toBe("GAV22I…KIME26");
+    expect(amount.text).toBe("2,500,000,000");
+    expect(amount.hint).toBe("250.00 at 7 decimals"); // the number a human can sanity-check
+  });
+
+  it("does not mistake a symbol or a short string for an address", () => {
+    expect(argLabel("transfer")).toEqual({ text: "transfer" });
+    expect(argLabel("GAV22INZ")).toEqual({ text: "GAV22INZ" });
+  });
+
+  it("renders the remaining Soroban types rather than dropping them", () => {
+    expect(argLabel(true).text).toBe("true");
+    expect(argLabel(42).text).toBe("42");
+    expect(argLabel(new Uint8Array([0xde, 0xad, 0x01])).text).toBe("0xdead01");
+    expect(argLabel([1n, "a"]).text).toBe('["1","a"]'); // nested vec, bigints kept readable
   });
 });

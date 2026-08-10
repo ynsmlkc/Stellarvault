@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatXLM, shortAddr, shortContract, toStroops, toStroopsSafe } from "./stellar";
+import { formatXLM, formatXLMExact, shortAddr, shortContract, toStroops, toStroopsSafe, xlmExact } from "./stellar";
 
 describe("toStroops", () => {
   it("converts whole and fractional amounts", () => {
@@ -42,6 +42,42 @@ describe("toStroops", () => {
   it("toStroopsSafe reports failure instead of throwing", () => {
     expect(toStroopsSafe("abc")).toBeNull();
     expect(toStroopsSafe("2.5")).toBe(25_000_000n);
+  });
+});
+
+describe("formatXLMExact", () => {
+  // The whole point of listing a batch line by line is that a line can't lie.
+  it("shows stroops the display formatter would hide", () => {
+    expect(formatXLM(1n)).toBe("0.00");
+    expect(formatXLMExact(1n)).toBe("0.0000001");
+    expect(formatXLMExact(99_999_999_999n)).toBe("9,999.9999999");
+  });
+
+  it("still reads like money when there is nothing to hide", () => {
+    expect(formatXLMExact(12_500_000n)).toBe("1.25");
+    expect(formatXLMExact(10_000_000n)).toBe("1.00");
+    expect(formatXLMExact(0n)).toBe("0.00");
+  });
+});
+
+describe("xlmExact", () => {
+  it("keeps every stroop, unlike the two-decimal display formatter", () => {
+    expect(xlmExact(10_050_000n)).toBe("1.005");
+    expect(formatXLM(10_050_000n)).toBe("1.00"); // why the display one can't prefill a form
+  });
+
+  it("trims to the shortest exact spelling", () => {
+    expect(xlmExact(10_000_000n)).toBe("1");
+    expect(xlmExact(0n)).toBe("0");
+    expect(xlmExact(1n)).toBe("0.0000001");
+  });
+
+  // Guards prefills its limit boxes with this and saves whatever is in them, so
+  // a value that did not survive the round trip would silently rewrite policy.
+  it("round-trips through toStroops", () => {
+    for (const v of [1n, 10_000_000n, 10_050_000n, 922_337_203_685_477_580n, 123_456_789n]) {
+      expect(toStroops(xlmExact(v))).toBe(v);
+    }
   });
 });
 

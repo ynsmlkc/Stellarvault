@@ -9,7 +9,10 @@ import {
   shortContract,
   formatXLM,
   contractExplorerUrl,
+  toStroops,
   toStroopsSafe,
+  xlmExact,
+  formatXLMExact,
 } from "@/lib/stellar";
 import {
   getVault,
@@ -41,8 +44,10 @@ import {
   getFactoryWasm,
   upgradeVaultDirect,
   getRetiredBefore,
+  getBatch,
   getVaultWasm,
   describeAdmin,
+  argLabel,
   describeError,
   OPEN_POLICY,
   type VaultConfig,
@@ -133,11 +138,16 @@ function LogoMark({ size = 30 }: { size?: number }) {
   );
 }
 
-function Row({ label, value, valueNode, mono }: { label: string; value?: string; valueNode?: React.ReactNode; mono?: boolean }) {
+function Row({ label, value, valueNode, valueNote, mono }: { label: string; value?: string; valueNode?: React.ReactNode; valueNote?: string; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, alignItems: "center" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, alignItems: "baseline", gap: 12 }}>
       <span style={{ color: "#8A857B" }}>{label}</span>
-      {valueNode ?? <span style={{ fontFamily: mono ? MONO : SANS, color: "#ECE7DD" }}>{value}</span>}
+      {valueNode ?? (
+        <span style={{ textAlign: "right" }}>
+          <span style={{ fontFamily: mono ? MONO : SANS, color: "#ECE7DD" }}>{value}</span>
+          {valueNote && <span style={{ display: "block", fontSize: 11.5, color: "#8A857B", marginTop: 3 }}>{valueNote}</span>}
+        </span>
+      )}
     </div>
   );
 }
@@ -182,6 +192,9 @@ export default function Page() {
   // this signer's own leaf, shown once so they can hand it to the owner
   const [myLeaf, setMyLeaf] = useState<bigint | null>(null);
   const [calls, setCalls] = useState<Record<number, CallSpec>>({});
+  // the payments inside a batch proposal — a co-signer approves the list, not
+  // the total, so the list has to be on screen
+  const [batches, setBatches] = useState<Record<number, BatchItem[]>>({});
   const [admins, setAdmins] = useState<Record<number, AdminAction>>({});
   const [retiredBefore, setRetiredBefore] = useState(0);
   // null = not known yet; true means the vault runs code older than the factory serves
@@ -232,18 +245,24 @@ export default function Page() {
       const [mine, current] = await Promise.all([getVaultWasm(addr), getFactoryWasm()]);
       setBehind(mine && current ? mine !== current : null);
 
-      const [cs, ad] = await Promise.all([
+      const [cs, ad, bt] = await Promise.all([
         Promise.all(p.map((x) => getCall(addr, x.id))),
         Promise.all(p.map((x) => getAdmin(addr, x.id))),
+        // only the ones flagged as batches, so this costs nothing on a vault
+        // that has never used one
+        Promise.all(p.map((x) => (map[x.id]?.is_batch ? getBatch(addr, x.id) : Promise.resolve([])))),
       ]);
       const callMap: Record<number, CallSpec> = {};
       const adminMap: Record<number, AdminAction> = {};
+      const batchMap: Record<number, BatchItem[]> = {};
       p.forEach((x, i) => {
         if (cs[i]) callMap[x.id] = cs[i]!;
         if (ad[i]) adminMap[x.id] = ad[i]!;
+        if (bt[i]?.length) batchMap[x.id] = bt[i];
       });
       setCalls(callMap);
       setAdmins(adminMap);
+      setBatches(batchMap);
     } catch (e) {
       // leave nulls; UI falls back to skeleton/empty
     } finally {
@@ -766,7 +785,7 @@ export default function Page() {
       {isApp && (
         <AppShell screen={screen} go={go} mode={mode} setMode={setMode} submitPropose={submitPropose} submitBatch={submitBatch} submitCall={submitCall} wallet={wallet}
           vaultAddress={vaultAddress} config={config} balance={balance} proposals={proposals} loading={loading} busy={busy}
-          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} admins={admins}
+          policy={policy} allowed={allowed} spent={spent} statuses={statuses} zkConfig={zkConfig} allowedContracts={allowedContracts} calls={calls} batches={batches} admins={admins}
           onCreate={doCreate} onApprove={doApprove} onApproveZk={doApproveZk} onExecute={doExecute} onCancel={doCancel} onDeposit={doDeposit} onOpenVault={selectVault} onRefresh={() => loadData()}
           onConfidentialProposed={(fn) => { refreshSoon(); showToast({ title: `${fn}() proposed`, sub: "A confidential operation is now a pending proposal — approve it like any other.", tone: "ok" }); }} onConfidentialError={(msg) => showToast({ title: "Confidential op failed", sub: msg, tone: "err" })} onToast={showToast} onAddSigner={doAddSigner} onRemoveSigner={doRemoveSigner} retiredBefore={retiredBefore} behind={behind} version={version} onUpgrade={doUpgrade} onSavePolicy={doSavePolicy} onAllowRecipient={doAllowRecipient} onRegisterKey={doRegisterKey} onPublishSignerSet={doPublishSignerSet} myLeaf={myLeaf} commitments={commitments} onAllowContract={doAllowContract} />
       )}
@@ -799,12 +818,8 @@ function ledgersToHuman(n: number): string {
   if (secs < 172800) return `${(secs / 3600).toFixed(secs < 36000 ? 1 : 0)} h`;
   return `${(secs / 86400).toFixed(1)} days`;
 }
-const xlmFromStroops = (v: bigint) => Number(v) / 1e7;
-const stroopsFromXlm = (s: string): bigint => {
-  const n = Number(String(s).replace(/,/g, "").trim());
-  if (!isFinite(n) || n < 0) throw new Error("Enter a valid amount");
-  return BigInt(Math.round(n * 1e7));
-};
+// Amounts are parsed by `toStroops` only — see the note on it. A float parser
+// used to live here, and `"1,5"` reached the chain as 15 XLM.
 
 /** Why "Execute" is unavailable right now, or null when it's clear to go. */
 function executeBlocker(p: Proposal, st: ProposalStatus | undefined, policy: Policy, balance: bigint | null): string | null {
@@ -1033,7 +1048,7 @@ type ShellProps = {
   screen: Screen; go: (s: Screen) => void; mode: Mode; setMode: (m: Mode) => void;
   submitPropose: (target: string, amount: string) => void; submitBatch: (items: BatchItem[]) => void; submitCall: (contract: string, fn: string, args: CallArg[]) => void; wallet: string | null; vaultAddress: string;
   config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; allowedContracts: string[]; calls: Record<number, CallSpec>; batches: Record<number, BatchItem[]>; admins: Record<number, AdminAction>;
   onCreate: (name: string, signers: string[], threshold: number) => void; onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onOpenVault: (addr: string) => void; onRefresh: () => void;
   onConfidentialProposed: (fn: string) => void; onConfidentialError: (msg: string) => void;
   onAddSigner: (signer: string) => void; onRemoveSigner: (signer: string) => void; retiredBefore: number; behind: boolean | null;
@@ -1085,7 +1100,7 @@ function AppShell(p: ShellProps) {
       <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
-        {p.screen === "vault" && <VaultDetail version={p.version} behind={p.behind} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
+        {p.screen === "vault" && <VaultDetail version={p.version} behind={p.behind} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} batches={p.batches} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
         {p.screen === "propose" && <Propose go={p.go} mode={p.mode} setMode={p.setMode} submitPropose={p.submitPropose} submitBatch={p.submitBatch} submitCall={p.submitCall} busy={p.busy} balance={p.balance} policy={p.policy} allowed={p.allowed} spent={p.spent} allowedContracts={p.allowedContracts} />}
         {p.screen === "guards" && <Guards behind={p.behind} go={p.go} wallet={p.wallet} config={p.config} policy={p.policy} allowed={p.allowed} spent={p.spent} busy={p.busy} zkConfig={p.zkConfig} allowedContracts={p.allowedContracts} version={p.version} onUpgrade={p.onUpgrade} onSave={p.onSavePolicy} onAllowRecipient={p.onAllowRecipient} onRegisterKey={p.onRegisterKey} onPublishSignerSet={p.onPublishSignerSet} myLeaf={p.myLeaf} commitments={p.commitments} onAllowContract={p.onAllowContract} />}
         {p.screen === "confidential" && (
@@ -1513,9 +1528,9 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 }
 
 /* ============================ VAULT DETAIL (live) ============================ */
-function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behind, retiredBefore, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
+function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behind, retiredBefore, go, vaultAddress, config, balance, proposals, loading, busy, wallet, policy, allowed, spent, statuses, zkConfig, calls, batches, admins, onApprove, onApproveZk, onExecute, onCancel, onDeposit, onRefresh }: {
   go: (s: Screen) => void; vaultAddress: string; config: VaultConfig | null; balance: bigint | null; proposals: Proposal[]; loading: boolean; busy: string | null; wallet: string | null;
-  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; admins: Record<number, AdminAction>;
+  policy: Policy; allowed: string[]; spent: bigint; statuses: Record<number, ProposalStatus>; zkConfig: ZkConfig | null; calls: Record<number, CallSpec>; batches: Record<number, BatchItem[]>; admins: Record<number, AdminAction>;
   onAddSigner: (s: string) => void; onRemoveSigner: (s: string) => void; pendingCount: number; version: number | null; behind: boolean | null; retiredBefore: number;
   onApprove: (id: number) => void; onApproveZk: (id: number) => void; onExecute: (id: number) => void; onCancel: (id: number) => void; onDeposit: () => void; onRefresh: () => void;
 }) {
@@ -1615,6 +1630,7 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
                 signerCount: config?.signer_count ?? signers.length,
                 st: statuses[p.id],
                 call: calls[p.id],
+                batch: batches[p.id],
                 admin: admins[p.id],
                 retired: isRetired(p),
                 blocker: executeBlocker(p, statuses[p.id], policy, balance),
@@ -1833,7 +1849,9 @@ function GuardValue({ on, text }: { on: boolean; text: string }) {
 
 /** How much of the current spending window is already used. */
 function CapMeter({ spent, cap }: { spent: bigint; cap: bigint }) {
-  const pct = cap > 0n ? Math.min(100, (xlmFromStroops(spent) / xlmFromStroops(cap)) * 100) : 0;
+  // integer math: a cap large enough to lose precision as a double is exactly
+  // the cap whose meter you want to trust
+  const pct = cap > 0n ? Math.min(100, Number((spent * 10_000n) / cap) / 100) : 0;
   const hot = pct >= 80;
   return (
     <div style={{ marginTop: 12 }}>
@@ -1891,12 +1909,113 @@ function ApprovalDots({ count, threshold, signers, gold }: { count: number; thre
   );
 }
 
+/** Shown when a proposal's real content could not be read off the chain. */
+function Unreadable({ what }: { what: string }) {
+  return (
+    <div style={{ border: "1px solid rgba(196,93,74,0.35)", background: "rgba(196,93,74,0.06)", borderRadius: 10, padding: "11px 13px", fontSize: 12.5, color: "#D08B77", lineHeight: 1.5 }}>
+      The {what} could not be read from the vault. Don&apos;t approve until it shows — the summary above is not the whole proposal.
+    </div>
+  );
+}
+
+const detailBox: React.CSSProperties = {
+  border: "1px solid rgba(236,231,221,0.08)",
+  borderRadius: 11,
+  background: "rgba(0,0,0,0.22)",
+  padding: "12px 14px",
+  marginBottom: 20,
+};
+const detailHead: React.CSSProperties = { fontSize: 11, color: "#8A857B", letterSpacing: ".08em", marginBottom: 10 };
+
+/**
+ * Every payment in a batch, not just the total.
+ *
+ * The umbrella proposal's `target` is the vault itself and its `amount` is the
+ * sum, so a card that renders only those two fields tells a co-signer nothing
+ * about where the money goes. The sum is re-checked here against the total the
+ * guards were applied to: they should never disagree, and if they ever do the
+ * signer is the one who needs to know.
+ */
+function BatchLines({ items, total }: { items?: BatchItem[]; total: bigint }) {
+  const [all, setAll] = useState(false);
+  if (!items?.length) return <div style={{ marginBottom: 20 }}><Unreadable what="list of payments" /></div>;
+  const sum = items.reduce((s, it) => s + it.amount, 0n);
+  const shown = all ? items : items.slice(0, 5);
+  return (
+    <div style={detailBox}>
+      <div style={detailHead}>{items.length} PAYMENT{items.length === 1 ? "" : "S"}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {shown.map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+            <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }} title={it.target}>
+              <span style={{ color: "#5a564d", marginRight: 8 }}>{i + 1}</span>{shortAddr(it.target, 6, 6)}
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", whiteSpace: "nowrap" }}>{formatXLMExact(it.amount)} <span style={{ color: "#8A857B" }}>XLM</span></span>
+          </div>
+        ))}
+      </div>
+      {items.length > 5 && (
+        <button onClick={() => setAll((x) => !x)} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, cursor: "pointer", padding: "8px 0 0" }}>
+          {all ? "Show fewer" : `Show all ${items.length}`}
+        </button>
+      )}
+      {sum !== total && (
+        <div style={{ marginTop: 10, fontSize: 12, color: "#D08B77" }}>
+          These add up to {formatXLMExact(sum)} XLM, but the proposal totals {formatXLMExact(total)} XLM.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the call actually does, argument by argument.
+ *
+ * A vault call can move any asset the callee controls, and all of that lives in
+ * the arguments — `transfer(3)` is not something anyone can consent to. Types
+ * come back from `scValToNative`, so an i128 also gets its 7-decimal reading:
+ * most Soroban tokens use 7, and 2500000000 vs 250 XLM is the difference a
+ * signer is being asked to catch.
+ */
+function CallArgs({ call }: { call: CallSpec }) {
+  return (
+    <div style={detailBox}>
+      <div style={detailHead}>CALL</div>
+      <div style={{ fontFamily: MONO, fontSize: 13.5, color: "#ECE7DD", marginBottom: call.args.length ? 12 : 0 }}>
+        {call.function}<span style={{ color: "#8A857B" }}>({call.args.length ? "" : ")"}</span>
+      </div>
+      {call.args.length > 0 && (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {call.args.map((a, i) => {
+              const { text, title, hint } = argLabel(a);
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", minWidth: 14 }}>{i}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", wordBreak: "break-all" }} title={title}>
+                    {text}
+                    {hint && <span style={{ color: "#8A857B" }}> · {hint}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 13.5, color: "#8A857B", marginTop: 10 }}>)</div>
+        </>
+      )}
+      <div style={{ fontSize: 12, color: "#8A857B", marginTop: 12, lineHeight: 1.5 }}>
+        The vault runs this as itself. Whatever it moves, it moves under the vault&apos;s authority.
+      </div>
+    </div>
+  );
+}
+
 type TxCardProps = {
   p: Proposal; threshold: number; signerCount: number; busy: string | null; iApproved: boolean;
-  st?: ProposalStatus; call?: CallSpec; admin?: AdminAction; retired?: boolean; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
+  st?: ProposalStatus; call?: CallSpec; batch?: BatchItem[]; admin?: AdminAction; retired?: boolean; blocker: string | null; canCancel: boolean; onCancel: (id: number) => void;
 };
 
-function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, retired, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
+function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, batch, admin, retired, blocker, canCancel, onCancel, onApprove, onExecute }: TxCardProps & { onApprove: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled || !!retired;
@@ -1916,13 +2035,14 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, a
           </div>
         ) : (
           <>
-            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
             {call
-              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}</div></div>
               : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
           </>
         )}
       </div>
+      {call ? <CallArgs call={call} /> : st?.is_batch ? <BatchLines items={batch} total={p.amount} /> : null}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
         {p.executed
           ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
@@ -1979,7 +2099,7 @@ function BatchBadge() {
   return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
-function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin, retired, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
+function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch, admin, retired, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
   const ready = p.approval_count >= threshold;
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled || !!retired;
@@ -2000,12 +2120,16 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, admin
           </div>
         ) : (
           <>
-            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? "multiple" : shortAddr(p.target)}</div></div>
+            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
             {call
-              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}<span style={{ color: "#8A857B" }}>({call.args.length})</span></div></div>
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}</div></div>
               : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
           </>
         )}
+      </div>
+      {/* hidden approvals, not a hidden proposal — what it does is public */}
+      <div style={{ position: "relative" }}>
+        {call ? <CallArgs call={call} /> : st?.is_batch ? <BatchLines items={batch} total={p.amount} /> : null}
       </div>
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
@@ -2061,20 +2185,19 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
     callArgs.every((a) => a.value.trim().length > 0);
 
   const validAddr = (a: string) => /^[GC][A-Z2-7]{55}$/.test(a.trim());
-  const rowAmount = (s: string) => {
-    const n = Number(String(s).replace(/,/g, "").trim());
-    return isFinite(n) && n > 0 ? n : 0;
-  };
-  const batchTotalXlm = rows.reduce((s, r) => s + rowAmount(r.amount), 0);
-  const totalXlm = batchMode ? batchTotalXlm : rowAmount(amount);
+  // stroops throughout, so the preview totals and the guard warnings agree with
+  // the contract to the last digit rather than to the nearest double
+  const rowAmount = (s: string) => toStroopsSafe(s) ?? 0n;
+  const batchTotal = rows.reduce((s, r) => s + rowAmount(r.amount), 0n);
+  const total = batchMode ? batchTotal : rowAmount(amount);
   const recipients = batchMode ? rows.map((r) => r.target.trim()).filter(Boolean) : [target.trim()].filter(Boolean);
 
   // the same guards the contract will enforce, surfaced before the wallet prompt
   const guardWarnings: string[] = [];
-  if (policy.max_per_tx > 0n && totalXlm > xlmFromStroops(policy.max_per_tx)) {
+  if (policy.max_per_tx > 0n && total > policy.max_per_tx) {
     guardWarnings.push(`Over the per-transaction limit of ${formatXLM(policy.max_per_tx)} XLM.`);
   }
-  if (policy.spending_cap > 0n && totalXlm > xlmFromStroops(policy.spending_cap - spent)) {
+  if (policy.spending_cap > 0n && total > policy.spending_cap - spent) {
     guardWarnings.push(`Only ${formatXLM(policy.spending_cap - spent)} XLM left in this spending window.`);
   }
   if (policy.allowlist_only) {
@@ -2083,14 +2206,15 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
   }
   const timelockNote = policy.timelock_ledgers > 0 ? `Executable ${ledgersToHuman(policy.timelock_ledgers)} after proposing (time-lock).` : null;
 
-  const batchReady = rows.length > 0 && rows.every((r) => validAddr(r.target) && rowAmount(r.amount) > 0);
+  const batchReady = rows.length > 0 && rows.every((r) => validAddr(r.target) && rowAmount(r.amount) > 0n);
   const setRowAt = (i: number, patch: Partial<{ target: string; amount: string }>) =>
     setRows((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
   const submit = () => {
     if (kind === "call") return submitCall(callTarget, callFn, callArgs);
     if (kind === "single") return submitPropose(target, amount);
-    submitBatch(rows.map((r) => ({ target: r.target.trim(), amount: stroopsFromXlm(r.amount) })));
+    // every row already parsed cleanly — `batchReady` gates the button on it
+    submitBatch(rows.map((r) => ({ target: r.target.trim(), amount: rowAmount(r.amount) })));
   };
 
   return (
@@ -2185,7 +2309,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <button onClick={() => setRows((xs) => (xs.length < 20 ? [...xs, { target: "", amount: "" }] : xs))} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer", marginBottom: 18 }}>+ Add payment</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 14, marginBottom: 22 }}>
                 <span style={{ fontSize: 13, color: "#8A857B" }}>Batch total · {rows.length} payment{rows.length === 1 ? "" : "s"}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 24, color: "#ECE7DD" }}>{batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 })} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 24, color: "#ECE7DD" }}>{formatXLM(batchTotal)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></span>
               </div>
             </>
           )}
@@ -2263,11 +2387,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", marginBottom: 18 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} valueNote={batchMode ? "every payment listed on their card" : undefined} mono />
                 {kind === "call" ? (
-                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                  <Row label="Call" value={`${callFn.trim() || "fn"}`} valueNote={`${callArgs.length} argument${callArgs.length === 1 ? "" : "s"}, each shown in full`} mono />
                 ) : (
-                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${batchMode ? formatXLM(batchTotal) : amount || "0.00"} XLM`} mono />
                 )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.08)" }} />
                 <Row label="Approvals" value="visible to all" />
@@ -2279,11 +2403,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🕶 ANONYMOUS APPROVALS</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
-                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} mono />
+                <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} valueNote={batchMode ? "every payment listed on their card" : undefined} mono />
                 {kind === "call" ? (
-                  <Row label="Call" value={`${callFn.trim() || "fn"}(${callArgs.length} args)`} mono />
+                  <Row label="Call" value={`${callFn.trim() || "fn"}`} valueNote={`${callArgs.length} argument${callArgs.length === 1 ? "" : "s"}, each shown in full`} mono />
                 ) : (
-                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${(batchMode ? batchTotalXlm.toLocaleString(undefined, { maximumFractionDigits: 7 }) : amount) || "0.00"} XLM`} mono />
+                  <Row label={batchMode ? "Batch total" : "Amount"} value={`${batchMode ? formatXLM(batchTotal) : amount || "0.00"} XLM`} mono />
                 )}
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
@@ -2342,8 +2466,8 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
   // Governance moved from the owner to the threshold, so the question this
   // screen asks is no longer "are you the owner" but "may you propose".
   const isSigner = !!wallet && !!config?.signers?.some((x) => x === wallet);
-  const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
-  const [cap, setCap] = useState(policy.spending_cap > 0n ? String(xlmFromStroops(policy.spending_cap)) : "");
+  const [maxPerTx, setMaxPerTx] = useState(policy.max_per_tx > 0n ? xlmExact(policy.max_per_tx) : "");
+  const [cap, setCap] = useState(policy.spending_cap > 0n ? xlmExact(policy.spending_cap) : "");
   const [window, setWindow] = useState(policy.cap_window_ledgers || 17280);
   const [timelock, setTimelock] = useState(policy.timelock_ledgers);
   const [allowlistOnly, setAllowlistOnly] = useState(policy.allowlist_only);
@@ -2353,8 +2477,8 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
 
   // the vault is the source of truth — resync whenever a fresh read lands
   useEffect(() => {
-    setMaxPerTx(policy.max_per_tx > 0n ? String(xlmFromStroops(policy.max_per_tx)) : "");
-    setCap(policy.spending_cap > 0n ? String(xlmFromStroops(policy.spending_cap)) : "");
+    setMaxPerTx(policy.max_per_tx > 0n ? xlmExact(policy.max_per_tx) : "");
+    setCap(policy.spending_cap > 0n ? xlmExact(policy.spending_cap) : "");
     setWindow(policy.cap_window_ledgers || 17280);
     setTimelock(policy.timelock_ledgers);
     setAllowlistOnly(policy.allowlist_only);
@@ -2369,12 +2493,17 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
     borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer",
   });
 
+  // A limit of zero is how the contract spells "no limit", so an empty box and
+  // a literal 0 mean the same thing here — `toStroops` refuses 0 as an amount,
+  // which is right for a payment and wrong for a policy field.
+  const limit = (s: string): bigint => (!s.trim() || /^0+(\.0+)?$/.test(s.trim()) ? 0n : toStroops(s));
+
   let parseError = "";
   let next: Policy | null = null;
   try {
     next = {
-      max_per_tx: maxPerTx.trim() ? stroopsFromXlm(maxPerTx) : 0n,
-      spending_cap: cap.trim() ? stroopsFromXlm(cap) : 0n,
+      max_per_tx: limit(maxPerTx),
+      spending_cap: limit(cap),
       cap_window_ledgers: window,
       timelock_ledgers: timelock,
       allowlist_only: allowlistOnly,

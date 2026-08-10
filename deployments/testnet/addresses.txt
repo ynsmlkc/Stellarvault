@@ -313,3 +313,38 @@ v8 -> v9 does not retire; v9 -> v10 will. Verified on the test vault:
 
 A vault already carrying orphaned state clears it with any signer change, which
 sets the watermark to the current tx id.
+
+================================================================================
+UI: a co-signer now sees what they are approving  (web only, no contract change)
+================================================================================
+
+Two proposal shapes were rendering as a summary a signer could not act on:
+
+  batch          Recipient "multiple", one "Batch total"    -> up to 20 payments
+                 with no way to see who was being paid what
+  contract call  transfer(3)                                -> the arg count,
+                 never the args
+
+`get_batch` existed in the contract and `getBatch` in lib/contract.ts; nothing
+ever called it. Both cards now list every payment and read out every argument,
+and an unreadable list says so in red rather than rendering as empty.
+
+Verified end to end on a throwaway vault, CBPWDYYIZNSN6MCXSAXMP7O5KNCWMO2FTOW2GNRKBEX4Y6BBRX3Z62OU
+(owner GCDSMBQLIGDXRRGY2PCNOSZVXKR5NNIUQE7WMUAYI6U7DF3RA7UXFFSO, 1-of-1, disposable):
+
+  #0  propose_batch, 3 items    -> get_batch returns all three, exact amounts
+                                   12500000 / 1 / 99999999999 stroops
+  #1  AllowContract             -> approve_and_execute in one transaction
+  #2  propose_call transfer     -> get_call args come back as
+                                   [Address, Address, bigint], which is what
+                                   argLabel() renders
+
+The 1-stroop row is why line items use formatXLMExact: formatXLM cuts at two
+decimals and showed a real payment as "0.00".
+
+Amount parsing: app/page.tsx had kept a float parser (Number(x) * 1e7) for batch
+rows and the two Guards limit fields. It read "1,5" as 15 XLM, rounded an 8th
+decimal away silently, and turned 0.00000001 into 0 — which the contract reads
+as "no limit", so the tightest possible spending cap became no cap at all.
+All three now go through toStroops. Guards prefills with xlmExact, which
+round-trips; formatXLM does not.

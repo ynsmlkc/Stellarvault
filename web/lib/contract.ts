@@ -12,7 +12,7 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import { CONFIG, NETWORK_PASSPHRASE } from "./stellar";
+import { CONFIG, NETWORK_PASSPHRASE, formatXLMExact } from "./stellar";
 
 const server = new rpc.Server(CONFIG.rpcUrl, { allowHttp: CONFIG.rpcUrl.startsWith("http://") });
 
@@ -795,6 +795,32 @@ export async function getAdmin(vaultAddr: string, txId: number): Promise<AdminAc
     }
   } catch {
     return null; // pre-v5 vault, or not an admin proposal
+  }
+}
+
+/**
+ * How to render one argument of a call proposal.
+ *
+ * `getCall` runs the args through `scValToNative`, so what arrives is a plain
+ * JS value whose type says what it was: an Address becomes a `G…`/`C…` string,
+ * an i128 a bigint, a symbol or string a string. A signer approving
+ * `transfer(3)` is consenting to nothing, so every argument gets read out —
+ * and a bigint gets its 7-decimal reading too, because 2500000000 and 250 XLM
+ * are the same number and only one of them is checkable by a human.
+ *
+ * `hint` is a reading, not a fact: the callee's own decimals decide, and 7 is
+ * only the Stellar convention.
+ */
+export function argLabel(v: unknown): { text: string; title?: string; hint?: string } {
+  if (typeof v === "string" && /^[GC][A-Z2-7]{55}$/.test(v)) return { text: `${v.slice(0, 6)}…${v.slice(-6)}`, title: v };
+  if (typeof v === "bigint") return { text: v.toLocaleString("en-US"), hint: `${formatXLMExact(v)} at 7 decimals` };
+  if (typeof v === "boolean" || typeof v === "number") return { text: String(v) };
+  if (typeof v === "string") return { text: v };
+  if (v instanceof Uint8Array) return { text: `0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` };
+  try {
+    return { text: JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)) ?? String(v) };
+  } catch {
+    return { text: String(v) };
   }
 }
 
