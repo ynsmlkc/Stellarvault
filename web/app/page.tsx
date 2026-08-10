@@ -833,15 +833,47 @@ function executeBlocker(p: Proposal, st: ProposalStatus | undefined, policy: Pol
 }
 
 /* ============================ LANDING ============================ */
+/**
+ * The gold glow and the grid behind everything.
+ *
+ * It used to exist only on the landing page, so pressing "Get Started" swapped
+ * one product for another: a composed hero, then flat black. The app gets the
+ * same layer at roughly a third of the strength — enough to carry the identity
+ * across, faint enough that nobody reads an amount through it. The orbital
+ * rings stay behind: they are a hero object, and behind a dense proposal list
+ * they are just noise.
+ */
+function Atmosphere({ dim }: { dim?: boolean }) {
+  const k = dim ? 0.5 : 1;
+  const a = (x: number) => (x * k).toFixed(3);
+  // The landing masks toward its hero. The app has no hero — it has a sticky
+  // bar across the top and a long reading column — so the grid holds through
+  // the upper half and thins out where the proposals are.
+  const mask = dim
+    ? "radial-gradient(ellipse 130% 95% at 50% -6%, #000 34%, transparent 86%)"
+    : "radial-gradient(ellipse 90% 80% at 60% 30%, #000 30%, transparent 80%)";
+  return (
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
+      {/* on the app this sits below the header bar rather than behind it,
+          where the blur would have eaten most of it */}
+      <div style={{ position: "absolute", top: dim ? "2%" : "-12%", right: "-8%", width: 780, height: 780, borderRadius: "50%", background: `radial-gradient(circle at center, rgba(201,168,106,${a(0.22)}), rgba(201,168,106,${a(0.05)}) 40%, transparent 66%)`, filter: "blur(8px)", animation: "vsGlow 9s ease-in-out infinite" }} />
+      <div style={{ position: "absolute", bottom: "-30%", left: "-12%", width: 620, height: 620, borderRadius: "50%", background: `radial-gradient(circle at center, rgba(201,168,106,${a(0.10)}), transparent 64%)`, filter: "blur(10px)" }} />
+      <div style={{
+        position: "absolute", inset: 0,
+        backgroundImage: `linear-gradient(rgba(236,231,221,${a(0.035)}) 1px,transparent 1px),linear-gradient(90deg,rgba(236,231,221,${a(0.035)}) 1px,transparent 1px)`,
+        backgroundSize: "64px 64px",
+        maskImage: mask,
+        WebkitMaskImage: mask,
+      }} />
+    </div>
+  );
+}
+
 function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVault: () => void; balance: bigint | null }) {
   const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <div style={{ position: "relative", minHeight: "100vh", overflow: "hidden" }}>
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
-        <div style={{ position: "absolute", top: "-12%", right: "-8%", width: 780, height: 780, borderRadius: "50%", background: "radial-gradient(circle at center, rgba(201,168,106,0.22), rgba(201,168,106,0.05) 40%, transparent 66%)", filter: "blur(8px)", animation: "vsGlow 9s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", bottom: "-30%", left: "-12%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle at center, rgba(201,168,106,0.10), transparent 64%)", filter: "blur(10px)" }} />
-        <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(236,231,221,0.035) 1px,transparent 1px),linear-gradient(90deg,rgba(236,231,221,0.035) 1px,transparent 1px)", backgroundSize: "64px 64px", maskImage: "radial-gradient(ellipse 90% 80% at 60% 30%, #000 30%, transparent 80%)", WebkitMaskImage: "radial-gradient(ellipse 90% 80% at 60% 30%, #000 30%, transparent 80%)" }} />
-      </div>
+      <Atmosphere />
       <div style={{ position: "fixed", top: "50%", right: -180, transform: "translateY(-50%)", width: 760, height: 760, pointerEvents: "none", opacity: 0.9, zIndex: 0 }}>
         <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.16)", animation: "vsSpin 80s linear infinite" }} />
         <div style={{ position: "absolute", inset: 70, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.12)" }} />
@@ -1065,7 +1097,8 @@ function AppShell(p: ShellProps) {
     <button onClick={onClick} className="h-nav" style={{ background: "transparent", border: "none", color: active ? "#ECE7DD" : "#8A857B", fontFamily: SANS, fontSize: 13, padding: "7px 12px", borderRadius: 7, cursor: "pointer" }}>{label}</button>
   );
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ position: "relative", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <Atmosphere dim />
       <div className="vapp-head" style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
         <div className="vapp-brand" style={{ display: "flex", alignItems: "center", gap: 34, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer" }} onClick={() => p.go("landing")}>
@@ -1097,7 +1130,7 @@ function AppShell(p: ShellProps) {
         </div>
       </div>
 
-      <div className="vsec vapp-body" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32, minWidth: 0 }}>
+      <div className="vsec vapp-body" style={{ position: "relative", zIndex: 1, flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32, minWidth: 0 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail version={p.version} behind={p.behind} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} batches={p.batches} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
