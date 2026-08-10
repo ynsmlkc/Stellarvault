@@ -980,7 +980,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
             <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
               {[
-                ["Smart-contract vault", "Soroban (Rust, SDK 23) — not native multi-sig, so it can run custom logic native accounts can't."],
+                ["Smart-contract vault", "Soroban (Rust, SDK 27) — not native multi-sig, so it can run custom logic native accounts can't."],
                 ["Our own ZK circuits", "voteApproval (Poseidon + Merkle membership + nullifier) & confidentialTransfer, compiled with circom."],
                 ["Groth16 in the browser", "Proofs are generated client-side with snarkjs; the chain records only a nullifier — never who approved."],
                 ["Factory architecture", "One deployed contract per vault, with an on-chain owner→vaults registry."],
@@ -1001,7 +1001,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
             </a>
             <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: 18, marginTop: 4 }}>
               <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#5a564d", marginBottom: 10 }}>STACK</div>
-              <div style={{ fontFamily: MONO, fontSize: 12, color: "#8A857B", lineHeight: 1.9 }}>Soroban SDK 23 · circom + circomlib<br />snarkjs Groth16 (BN254)<br />Next.js 14 · Freighter · Protocol 23</div>
+              <div style={{ fontFamily: MONO, fontSize: 12, color: "#8A857B", lineHeight: 1.9 }}>Soroban SDK 27 · circom + circomlib<br />snarkjs Groth16 (BN254)<br />Next.js 14 · Freighter · Protocol 27</div>
             </div>
           </div>
         </div>
@@ -1066,13 +1066,13 @@ function AppShell(p: ShellProps) {
   );
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 34 }}>
+      <div className="vapp-head" style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
+        <div className="vapp-brand" style={{ display: "flex", alignItems: "center", gap: 34, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer" }} onClick={() => p.go("landing")}>
             <LogoMark size={28} />
             <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13 }}>STELLAR&nbsp;VAULT</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+          <div className="vapp-crumb" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
             {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
             {/* Guards and the confidential balance belong to ONE vault — its
                 limits, its signer set, its balance. They show only while you
@@ -1081,8 +1081,8 @@ function AppShell(p: ShellProps) {
                 list, which is exactly where they do not belong. */}
             {inVault && p.vaultAddress && (
               <>
-                <span style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
+                <span className="vapp-crumb-name" style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
+                <span className="vapp-crumb-name" style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
                   {p.config?.name || shortContract(p.vaultAddress)}
                 </span>
                 {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
@@ -1092,12 +1092,12 @@ function AppShell(p: ShellProps) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 7, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
+          <div className="vapp-net" style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 7, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
           <WalletMenu wallet={p.wallet} onToast={p.onToast} />
         </div>
       </div>
 
-      <div className="vsec" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32 }}>
+      <div className="vsec vapp-body" style={{ flex: 1, width: "100%", maxWidth: 1340, margin: "0 auto", padding: 32, minWidth: 0 }}>
         {p.screen === "dashboard" && <Dashboard go={p.go} wallet={p.wallet} balance={p.balance} proposals={p.proposals} vaultAddress={p.vaultAddress} onOpenVault={p.onOpenVault} />}
         {p.screen === "create" && <CreateVault go={p.go} wallet={p.wallet} busy={p.busy} onCreate={p.onCreate} />}
         {p.screen === "vault" && <VaultDetail version={p.version} behind={p.behind} retiredBefore={p.retiredBefore} onAddSigner={p.onAddSigner} onRemoveSigner={p.onRemoveSigner} pendingCount={p.proposals.filter((x) => !x.executed && !p.statuses[x.id]?.cancelled).length} go={p.go} vaultAddress={p.vaultAddress} config={p.config} balance={p.balance} proposals={p.proposals} loading={p.loading} busy={p.busy} wallet={p.wallet} policy={p.policy} allowed={p.allowed} spent={p.spent} statuses={p.statuses} zkConfig={p.zkConfig} calls={p.calls} batches={p.batches} admins={p.admins} onApprove={p.onApprove} onApproveZk={p.onApproveZk} onExecute={p.onExecute} onCancel={p.onCancel} onDeposit={p.onDeposit} onRefresh={p.onRefresh} />}
@@ -1553,20 +1553,20 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
 
       <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.22)", borderRadius: 17, background: "linear-gradient(180deg,#15140f,#111110)", padding: "28px 30px", marginBottom: 24, overflow: "hidden" }}>
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-              <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || "Vault"}</h1>
+        <div className="vapp-vhead" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+              <h1 className="vapp-wrap" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || "Vault"}</h1>
               <span style={{ fontFamily: MONO, fontSize: 11, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.32)", borderRadius: 6, padding: "4px 9px" }}>{threshold} / {config?.signer_count ?? signers.length} threshold</span>
               <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "2px 6px" }}>LIVE · TESTNET</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 12, color: "#8A857B" }}>
+            <div className="vapp-wrap" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontFamily: MONO, fontSize: 12, color: "#8A857B" }}>
               {shortAddr(vaultAddress, 8, 9)}
               <span className="h-copy" style={{ cursor: "pointer", color: "#C9A86A" }} onClick={() => navigator.clipboard?.writeText(vaultAddress)}>⧉ copy</span>
               <a className="h-copy" href={contractExplorerUrl(vaultAddress)} target="_blank" rel="noreferrer" style={{ cursor: "pointer", color: "#C9A86A", textDecoration: "none" }}>↗ explorer</a>
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
+          <div className="vapp-vhead-bal" style={{ textAlign: "right" }}>
             <div style={{ fontSize: 12, color: "#8A857B", marginBottom: 4 }}>Vault balance</div>
             <div style={{ fontFamily: DISPLAY, fontSize: 38, lineHeight: 1 }}>{balance != null ? formatXLM(balance) : (loading ? "…" : "—")} <span style={{ fontSize: 16, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div>
           </div>
@@ -1580,8 +1580,8 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
             </div>
             <span style={{ fontSize: 13, color: "#8A857B" }}>{config?.signer_count ?? signers.length} signers</span>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={onRefresh} disabled={loading} className="h-deposit" title="Refresh from chain" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#8A857B", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 9, padding: "11px 14px", fontFamily: SANS, fontSize: 14, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>↻</button>
+          <div className="vapp-actions" style={{ display: "flex", gap: 10 }}>
+            <button onClick={onRefresh} disabled={loading} className="h-deposit h-icon" title="Refresh from chain" aria-label="Refresh from chain" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#8A857B", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 9, padding: "11px 14px", fontFamily: SANS, fontSize: 14, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>↻</button>
             <button onClick={onDeposit} disabled={busy === "deposit"} className="h-deposit" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 500, cursor: "pointer", opacity: busy === "deposit" ? 0.6 : 1 }}>{busy === "deposit" ? "Depositing…" : "↓ Deposit 100"}</button>
             <button onClick={() => go("propose")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>+ New Transaction</button>
           </div>
@@ -1608,7 +1608,7 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24, alignItems: "start" }}>
+      <div className="vapp-side" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24, alignItems: "start", minWidth: 0 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1992,9 +1992,11 @@ function CallArgs({ call }: { call: CallSpec }) {
               return (
                 <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", minWidth: 14 }}>{i}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", wordBreak: "break-all" }} title={title}>
-                    {text}
-                    {hint && <span style={{ color: "#8A857B" }}> · {hint}</span>}
+                  {/* the value may break anywhere — an address has no word
+                      boundaries — but the reading beside it is prose */}
+                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", minWidth: 0 }} title={title}>
+                    <span style={{ wordBreak: "break-all" }}>{text}</span>
+                    {hint && <span style={{ color: "#8A857B", wordBreak: "normal" }}> · {hint}</span>}
                   </span>
                 </div>
               );
@@ -2026,7 +2028,7 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, b
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{admin ? <RuleBadge /> : call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>proposal #{p.id}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
+      <div className="vapp-txgrid vapp-wrap" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
         {admin ? (
           <div style={{ gridColumn: "span 2" }}>
@@ -2111,7 +2113,7 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🕶 ANONYMOUS APPROVALS{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
-      <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
+      <div className="vapp-txgrid vapp-wrap" style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
         <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
         {admin ? (
           <div style={{ gridColumn: "span 2" }}>
@@ -2235,7 +2237,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start" }}>
+      <div className="vapp-side" style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start", minWidth: 0 }}>
         <div style={{ border: `1px solid ${isPrivate ? "rgba(236,231,221,0.1)" : "rgba(201,168,106,0.24)"}`, borderRadius: 15, background: isPrivate ? "#0d0d0d" : "linear-gradient(180deg,#15140f,#111110)", padding: 28, transition: "border-color .3s,background .3s" }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 22 }}>
             {([["Single payment", "single"], ["Batch", "batch"], ["Contract call", "call"]] as const).map(([label, v]) => (

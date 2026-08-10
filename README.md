@@ -110,7 +110,7 @@ The transparent products prove the **demand** for multi-sig on Stellar. We add t
 | Proving        | snarkjs (Groth16, BN254) — runs in the browser       |
 | Frontend       | Next.js 14 (App Router) + React 18 + TypeScript      |
 | Wallet         | Freighter (`@stellar/freighter-api`)                 |
-| SDK            | `@stellar/stellar-sdk` 16 (Protocol 23)              |
+| SDK            | `@stellar/stellar-sdk` 16 (Protocol 27)              |
 
 ---
 
