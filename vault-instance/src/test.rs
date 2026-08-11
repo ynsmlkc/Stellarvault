@@ -6,7 +6,7 @@ use soroban_sdk::{
     vec, Address, Bytes, Env, String, U256, Vec,
 };
 
-use crate::{AdminAction, BatchItem, Error, Policy, VaultInstance, VaultInstanceClient, ZKApproval, ZkConfig};
+use crate::{AdminAction, BatchItem, DataKey, Error, Policy, VaultInstance, VaultInstanceClient, ZKApproval, ZkConfig};
 
 struct Setup<'a> {
     env: Env,
@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 11);
+    assert_eq!(s.vault.version(), 12);
 }
 
 #[test]
@@ -348,11 +348,20 @@ fn test_spending_cap_within_and_across_windows() {
     assert!(spend(500).is_ok());
     assert_eq!(s.vault.spent_in_window(), 1_500);
 
-    // next window resets the budget
-    s.env.ledger().set_sequence_number(250); // window 2
+    // Past the boundary the old window does not vanish, it fades. This used to
+    // assert `spent_in_window() == 0` right here, and that property is exactly
+    // what let two executions one ledger apart spend twice the cap. Half a
+    // length past the roll, half of the 1,500 still counts.
+    s.env.ledger().set_sequence_number(250);
+    assert_eq!(s.vault.spent_in_window(), 750, "yesterday fades, it does not disappear");
+    assert_eq!(spend(751), Err(Ok(Error::ExceedsSpendingCap)));
+    assert!(spend(750).is_ok(), "and the rest of the budget is genuinely there");
+
+    // a full length clear of everything, the budget is whole again
+    s.env.ledger().set_sequence_number(450);
     assert_eq!(s.vault.spent_in_window(), 0);
     assert!(spend(1_500).is_ok());
-    assert_eq!(s.token.balance(&recipient), 3_000);
+    assert_eq!(s.token.balance(&recipient), 3_750);
 }
 
 // ----------------------------------------------------------- guard: allowlist
@@ -1819,4 +1828,162 @@ fn test_changing_the_zk_signer_set_retires_open_proposals() {
         s.vault.try_approve(&tx, &s.signer(0)),
         Err(Ok(Error::SignerSetChanged))
     );
+}
+
+/* ================= the spending cap, actually =================
+
+The cap was a fixed bucket keyed on `ledger / len`, which meant "1M per day"
+bought 2M across a boundary. v11 anchored the window to the first spend, which
+moved the boundary rather than removing it — and introduced two new leaks. All
+three tests below assert the cap the policy claims to be. */
+
+/// A budget already spent is still spent after the code changes underneath it.
+///
+/// v9 booked into `DataKey::Spent(ledger / len)`; v11 reads `DataKey::Window`,
+/// which an upgraded vault does not have. The whole cap came back, and the
+/// signers approving the upgrade were approving "replace the code", not
+/// "refill the treasury's daily budget".
+#[test]
+fn test_an_upgraded_vault_keeps_the_budget_it_already_spent() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 1_000, cap_window_ledgers: 100, timelock_ledgers: 0, allowlist_only: false });
+
+    // exactly what v9 left behind: the whole cap consumed in the live bucket
+    let now = s.env.ledger().sequence();
+    s.env.as_contract(&s.vault_addr, || {
+        s.env.storage().persistent().set(&DataKey::Spent(now / 100), &1_000i128);
+    });
+
+    assert_eq!(s.vault.spent_in_window(), 1_000, "v11 must see what v9 booked");
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &1, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ExceedsSpendingCap)),
+        "the upgrade must not refill the budget"
+    );
+}
+
+/// The spender chooses when the window opens, so the window must not be the
+/// whole of the accounting.
+///
+/// Open it with 1 stroop, fill it at the far end, then step one ledger past
+/// the length and the budget is whole again — twice the cap in two adjacent
+/// ledgers, self-scheduled instead of calendar-scheduled.
+#[test]
+fn test_the_cap_cannot_be_doubled_by_placing_the_first_spend() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 1_000, cap_window_ledgers: 100, timelock_ledgers: 0, allowlist_only: false });
+    let to = Address::generate(&s.env);
+    let pay = |amt: i128| {
+        let tx = s.vault.propose(&s.signer(0), &to, &amt, &false);
+        s.vault.approve(&tx, &s.signer(0));
+        s.vault.try_execute(&tx, &s.signer(0))
+    };
+    // deliberately away from ledger 0: `opened == 0` doubles as "no window
+    // yet", so a window that genuinely opens at ledger 0 is discarded on the
+    // next read — which masked this very attack the first time it was written
+    let start = 5_000u32;
+    s.env.ledger().set_sequence_number(start);
+    assert!(pay(1).is_ok(), "opens the window");
+    s.env.ledger().set_sequence_number(start + 99);
+    assert!(pay(999).is_ok(), "fills it");
+    assert_eq!(s.vault.spent_in_window(), 1_000, "the window holds both");
+    s.env.ledger().set_sequence_number(start + 100);
+    assert_eq!(
+        pay(1_000),
+        Err(Ok(Error::ExceedsSpendingCap)),
+        "one ledger later is not a fresh budget"
+    );
+    assert_eq!(s.token.balance(&to), 1_000);
+}
+
+/// Shortening the window must not retroactively expire the one in force.
+///
+/// `window_len` was read from the *current* policy on every call, so a policy
+/// change was enough to release a fully consumed budget — the opposite of what
+/// the comment beside it claimed.
+#[test]
+fn test_shrinking_the_window_does_not_free_the_spent_budget() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 1_000, cap_window_ledgers: 100_000, timelock_ledgers: 0, allowlist_only: false });
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &1_000, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.vault.spent_in_window(), 1_000);
+
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 1_000, cap_window_ledgers: 1, timelock_ledgers: 0, allowlist_only: false });
+    let tx2 = s.vault.propose(&s.signer(0), &to, &1_000, &false);
+    s.vault.approve(&tx2, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx2, &s.signer(0)),
+        Err(Ok(Error::ExceedsSpendingCap)),
+        "the window in force keeps the length it opened with"
+    );
+}
+
+/// A call that pays somebody answers to the allowlist, like any other payment.
+///
+/// v11 added `check_limit` and `charge_window` to the call branch and stopped
+/// there. The commit naming the gap listed four guards and closed two: a vault
+/// with `allowlist_only` on refused a direct payment to a stranger and let the
+/// identical movement through as a call.
+#[test]
+fn test_a_call_cannot_pay_someone_off_the_allowlist() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.admin(AdminAction::AllowContract(s.token.address.clone()));
+    let allowed = Address::generate(&s.env);
+    s.admin(AdminAction::AllowRecipient(allowed));
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 0, cap_window_ledgers: 0, timelock_ledgers: 0, allowlist_only: true });
+
+    let stranger = Address::generate(&s.env);
+    assert!(s.vault.try_propose(&s.signer(0), &stranger, &500, &false).is_err(), "the direct route is closed");
+
+    let args = vec![
+        &s.env,
+        s.vault_addr.into_val(&s.env),
+        stranger.clone().into_val(&s.env),
+        500i128.into_val(&s.env),
+    ];
+    let tx = s.vault.propose_call(&s.signer(0), &s.token.address, &Symbol::new(&s.env, "transfer"), &args, &Vec::new(&s.env), &false);
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::RecipientNotAllowed)),
+        "and so is the one through a call"
+    );
+    assert_eq!(s.token.balance(&stranger), 0);
+}
+
+/// Removing a signer must not leave a threshold the remaining set cannot reach.
+///
+/// The v11 duplicate check went into `__constructor`, which does not run on an
+/// upgrade — so every vault deployed before it keeps the defect. The guard
+/// assumes one entry leaves while `apply_admin` drops every match, and a
+/// disagreement between them strands the vault below its own threshold with no
+/// way back: even the `SetThreshold` that would repair it needs the threshold.
+#[test]
+fn test_removing_a_signer_can_never_strand_the_threshold() {
+    let s = setup(2); // 2-of-3
+    let tx = s.vault.propose_admin(&s.signer(0), &AdminAction::RemoveSigner(s.signer(2)));
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve(&tx, &s.signer(1));
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.vault.get_config().signer_count, 2, "2-of-2 is still reachable");
+
+    // one more would leave 2-of-1, and it is refused where it is proposed —
+    // `check_admin` runs at both ends, so a proposal that could never land is
+    // never created and never collects approvals
+    assert_eq!(
+        s.vault.try_propose_admin(&s.signer(0), &AdminAction::RemoveSigner(s.signer(1))),
+        Err(Ok(Error::BadThreshold)),
+        "checked against what the set actually becomes"
+    );
+    assert_eq!(s.vault.get_config().signer_count, 2);
 }

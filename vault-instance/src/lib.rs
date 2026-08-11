@@ -70,7 +70,10 @@ const RETIRED: Symbol = symbol_short!("retired");
 ///  10 — one signer, one approval: the channels share a ledger and a mode
 ///  11 — the guards actually guard: calls are charged, the lock runs from the
 ///       last approval, the cap window rolls, no duplicate signers
-const VERSION: u32 = 11;
+///  12 — v11's half-fixes finished: a call answers to the allowlist too, the
+///       cap window slides instead of stepping, removal counts the set it
+///       leaves behind
+const VERSION: u32 = 12;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -159,8 +162,9 @@ pub enum DataKey {
     Cancelled(u64),
     /// Items of a batch (multi-call) proposal.
     Batch(u64),
-    /// Unused since v11 — the cap window was keyed by absolute bucket index.
-    /// Kept so the discriminants of everything below it stay put.
+    /// Pre-v11 cap accounting, keyed by absolute bucket index. Still read once
+    /// on an upgraded vault, to seed [`DataKey::Window`] from what the old code
+    /// had already booked; never written.
     Spent(u32),
     /// The contract call a proposal performs, when it is a call rather than a
     /// transfer.
@@ -867,6 +871,12 @@ impl VaultInstance {
             if moved > 0 {
                 Self::check_limit(&policy, moved)?;
                 Self::charge_window(&env, &policy, moved)?;
+                // The allowlist is about who may be paid, and a call that
+                // moved funds paid somebody. The callee is on the *call*
+                // allowlist, which answers a different question — v11 charged
+                // the amount against the limits and left this one open, so a
+                // payment refused at `propose` went through as a call.
+                Self::check_recipient(&env, &policy, &spec.contract)?;
             }
 
             CallExecutedEvent {
@@ -1051,7 +1061,7 @@ impl VaultInstance {
     /// Amount already executed in the current cap window.
     pub fn spent_in_window(env: Env) -> i128 {
         let policy = Self::policy_of(&env);
-        Self::window_now(&env, &policy).1
+        Self::window_used(&env, &policy)
     }
 
     pub fn is_signer(env: Env, signer: Address) -> bool {
@@ -1185,9 +1195,25 @@ impl VaultInstance {
                 if !Self::is_signer_internal(env, a) {
                     return Err(Error::SignerNotFound);
                 }
+                // Counted, not assumed. This used to subtract one, while
+                // `apply_admin` removes every match — so a signer set holding
+                // a duplicate (which vaults deployed before v11 accepted, and
+                // which the factory still does not screen) could be reduced
+                // below its own threshold and stranded: nothing can reach the
+                // threshold again, including the `SetThreshold` that would
+                // repair it.
                 let signers: Vec<Address> = env.storage().instance().get(&SIGNERS).unwrap();
                 let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
-                if threshold > signers.len() as u32 - 1 {
+                let mut remaining: u32 = 0;
+                for x in signers.iter() {
+                    if x != *a {
+                        remaining += 1;
+                    }
+                }
+                if remaining == 0 {
+                    return Err(Error::NoSigners);
+                }
+                if threshold > remaining {
                     return Err(Error::BadThreshold);
                 }
             }
@@ -1516,27 +1542,70 @@ impl VaultInstance {
         }
     }
 
-    /// The window in force: when it opened, and how much has gone out of it.
+    /// The window in force: `(opened, spent in it, spent in the one before, its length)`.
     ///
-    /// The window opens at the first spend and closes a full length later,
-    /// rather than sitting on an absolute `ledger / len` boundary. Fixed
-    /// buckets made a cap of "1M per day" mean "2M, if you wait for midnight":
-    /// consumption reset at every multiple of the length no matter when the
-    /// spending happened, so two executions one ledger apart either side of a
-    /// boundary both passed. Anchoring to the first spend also stops a change
-    /// to `cap_window_ledgers` from silently re-indexing the budget to zero.
-    fn window_now(env: &Env, policy: &Policy) -> (u32, i128) {
-        let (opened, spent): (u32, i128) = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Window)
-            .unwrap_or((0, 0));
+    /// A sliding-window counter, not a bucket. Any fixed bucket — absolute or
+    /// anchored to the first spend — lets a cap of "1M per day" pass 2M in two
+    /// adjacent ledgers, because the boundary resets consumption to zero and
+    /// the spender can choose to sit on it. Carrying the previous window and
+    /// weighting it by how much of the current one has elapsed removes the
+    /// step: right after a roll the old usage still counts in full, and it
+    /// fades out linearly over one length.
+    ///
+    /// Three things this has to survive, each of which broke an earlier
+    /// version:
+    ///
+    /// - **an upgrade.** v9 booked into `DataKey::Spent(ledger / len)`, which
+    ///   v11 never read, so upgrading refilled the budget. Absent state is
+    ///   seeded from that legacy key here rather than in the `Upgrade` branch,
+    ///   because an upgrade runs under the code being replaced.
+    /// - **a policy change.** The length is stored with the window instead of
+    ///   read from the current policy, so shortening `cap_window_ledgers`
+    ///   cannot retroactively expire a window that is still running.
+    /// - **ledger zero.** `opened` is not a sentinel any more; the entry's
+    ///   presence is. A window that genuinely opened at ledger 0 used to be
+    ///   discarded on the next read.
+    fn window_now(env: &Env, policy: &Policy) -> (u32, i128, i128, u32) {
         let now = env.ledger().sequence();
-        if opened == 0 || now.saturating_sub(opened) >= Self::window_len(policy) {
-            (now, 0)
+        let len = Self::window_len(policy);
+        let stored: Option<(u32, i128, i128, u32)> =
+            env.storage().persistent().get(&DataKey::Window);
+
+        let (opened, spent, prev, wlen) = match stored {
+            Some(w) => w,
+            None => {
+                // pre-v11 state, if any: the bucket this ledger falls in
+                let legacy: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Spent(now / len))
+                    .unwrap_or(0);
+                ((now / len) * len, legacy, 0, len)
+            }
+        };
+
+        let elapsed = now.saturating_sub(opened);
+        if elapsed >= wlen.saturating_mul(2) {
+            (now, 0, 0, len) // both windows are history
+        } else if elapsed >= wlen {
+            (opened.saturating_add(wlen), 0, spent, len) // roll one along
         } else {
-            (opened, spent)
+            (opened, spent, prev, wlen)
         }
+    }
+
+    /// What the cap is measured against: this window plus the fading remainder
+    /// of the last one.
+    fn window_used(env: &Env, policy: &Policy) -> i128 {
+        let (opened, spent, prev, wlen) = Self::window_now(env, policy);
+        if prev == 0 || wlen == 0 {
+            return spent;
+        }
+        let elapsed = env.ledger().sequence().saturating_sub(opened).min(wlen);
+        let carry = prev
+            .saturating_mul((wlen - elapsed) as i128)
+            .saturating_div(wlen as i128);
+        spent.saturating_add(carry)
     }
 
     /// Book `amount` against the current window, rejecting if it breaks the cap.
@@ -1544,12 +1613,13 @@ impl VaultInstance {
         if policy.spending_cap == 0 {
             return Ok(());
         }
-        let (opened, spent) = Self::window_now(env, policy);
-        let next = spent.checked_add(amount).ok_or(Error::ExceedsSpendingCap)?;
-        if next > policy.spending_cap {
+        let (opened, spent, prev, wlen) = Self::window_now(env, policy);
+        let used = Self::window_used(env, policy);
+        if used.checked_add(amount).ok_or(Error::ExceedsSpendingCap)? > policy.spending_cap {
             return Err(Error::ExceedsSpendingCap);
         }
-        env.storage().persistent().set(&DataKey::Window, &(opened, next));
+        let next = spent.checked_add(amount).ok_or(Error::ExceedsSpendingCap)?;
+        env.storage().persistent().set(&DataKey::Window, &(opened, next, prev, wlen));
         Self::bump_key(env, &DataKey::Window);
         Ok(())
     }
