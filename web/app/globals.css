@@ -89,7 +89,8 @@ input:focus { outline: none; }
      the first fix and it was wrong: Guards and Hidden amounts live only here,
      so hiding the bar removed the only way to reach them on a phone. */
   .vapp-head { padding: 12px 16px !important; flex-wrap: wrap !important; gap: 10px !important; }
-  .vapp-brand { flex-wrap: wrap !important; gap: 12px !important; }
+  /* two rows, not three: logo and wallet chip share row one, the nav takes
+     row two on its own */
   .vapp-crumb {
     order: 3 !important;
     width: 100% !important;
@@ -102,6 +103,7 @@ input:focus { outline: none; }
   /* the vault's name is already the page heading below */
   .vapp-crumb-name { display: none !important; }
   .vapp-body { padding: 20px 16px !important; }
+  .vapp-foot { padding: 20px 16px !important; }
   /* proposal summary: three columns of address and amount will not fit */
   .vapp-txgrid { grid-template-columns: 1fr 1fr !important; gap: 14px !important; }
   .vapp-txgrid > div:last-child { text-align: left !important; }

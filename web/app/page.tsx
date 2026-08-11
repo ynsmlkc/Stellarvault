@@ -1099,32 +1099,30 @@ function AppShell(p: ShellProps) {
   return (
     <div style={{ position: "relative", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <Atmosphere dim />
-      <div className="vapp-head" style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
-        <div className="vapp-brand" style={{ display: "flex", alignItems: "center", gap: 34, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer" }} onClick={() => p.go("landing")}>
-            <LogoMark size={28} />
-            <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13 }}>STELLAR&nbsp;VAULT</span>
-          </div>
-          <div className="vapp-crumb" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-            {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
-            {/* Guards and the confidential balance belong to ONE vault — its
-                limits, its signer set, its balance. They show only while you
-                are inside that vault: gating on "a vault is selected" is not
-                enough, because the selection survives navigating back to the
-                list, which is exactly where they do not belong. */}
-            {inVault && p.vaultAddress && (
-              <>
-                <span className="vapp-crumb-name" style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
-                <span className="vapp-crumb-name" style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
-                  {p.config?.name || shortContract(p.vaultAddress)}
-                </span>
-                {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
-                {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
-              </>
-            )}
-          </div>
+      <div className="vapp-head" style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", gap: 34, padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
+        <div className="vapp-brand" style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer", minWidth: 0 }} onClick={() => p.go("landing")}>
+          <LogoMark size={28} />
+          <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13, whiteSpace: "nowrap" }}>STELLAR&nbsp;VAULT</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div className="vapp-crumb" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, minWidth: 0 }}>
+          {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
+          {/* Guards and the confidential balance belong to ONE vault — its
+              limits, its signer set, its balance. They show only while you
+              are inside that vault: gating on "a vault is selected" is not
+              enough, because the selection survives navigating back to the
+              list, which is exactly where they do not belong. */}
+          {inVault && p.vaultAddress && (
+            <>
+              <span className="vapp-crumb-name" style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
+              <span className="vapp-crumb-name" style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
+                {p.config?.name || shortContract(p.vaultAddress)}
+              </span>
+              {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
+              {navBtn("💰 Hidden amounts", p.screen === "confidential", () => p.go("confidential"))}
+            </>
+          )}
+        </div>
+        <div className="vapp-right" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
           <div className="vapp-net" style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 7, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
           <WalletMenu wallet={p.wallet} onToast={p.onToast} />
         </div>
@@ -1148,6 +1146,21 @@ function AppShell(p: ShellProps) {
             onError={p.onConfidentialError}
           />
         )}
+      </div>
+
+      {/* The app had no closing edge, so a short screen ended in several
+          hundred pixels of nothing and read as still loading. The landing
+          page closes the same way. */}
+      <div className="vapp-foot" style={{ position: "relative", zIndex: 1, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "22px 32px", marginTop: 40 }}>
+        <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", fontSize: 12.5, color: "#5a564d" }}>
+          <span style={{ letterSpacing: ".14em" }}>STELLAR&nbsp;VAULT</span>
+          <span style={{ fontFamily: MONO, display: "inline-flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <a className="h-copy" href={contractExplorerUrl(CONFIG.factoryId)} target="_blank" rel="noopener noreferrer" style={{ color: "#5a564d", textDecoration: "none" }}>
+              factory {shortContract(CONFIG.factoryId)} ↗
+            </a>
+            <span>Soroban testnet</span>
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -1416,6 +1429,7 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
         {!loadingVaults && myVaults.filter((v) => showHidden || !hidden.includes(v.address)).map((v) => (
           <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live hidden={hidden.includes(v.address)} onToggleHidden={() => toggleHidden(v.address)} />
         ))}
+        {!loadingVaults && wallet && myVaults.length > 0 && <CreateVaultTile onClick={() => go("create")} />}
         {!loadingVaults && !myVaults.length && wallet && (
           <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
             No vaults yet. Click <span style={{ color: "#C9A86A" }}>“Create New Vault”</span> — each one is its own contract, recorded on-chain.
@@ -1442,6 +1456,29 @@ function Stat({ label, valueNode, gold }: { label: string; valueNode: React.Reac
     </div>
   );
 }
+/**
+ * The empty slot beside the vaults, turned into the action that fills it.
+ *
+ * With one vault, a three-column grid left two thirds of the row blank and the
+ * page read as unfinished. This is not filler: creating a vault is the primary
+ * action of the screen, and this puts it where the eye already is, next to
+ * what you have. It sits after the last vault, so the row is never ragged.
+ */
+function CreateVaultTile({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="h-addsigner" style={{
+      display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 8,
+      minHeight: 168, width: "100%", textAlign: "left", cursor: "pointer",
+      border: "1px dashed rgba(236,231,221,0.14)", borderRadius: 15, background: "transparent",
+      padding: 24, fontFamily: SANS,
+    }}>
+      <span style={{ fontSize: 22, lineHeight: 1, color: "#C9A86A" }}>+</span>
+      <span style={{ fontSize: 15, fontWeight: 600, color: "#ECE7DD" }}>Create a vault</span>
+      <span style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>Its own contract, its own signers and balance.</span>
+    </button>
+  );
+}
+
 function VaultCardSkeleton() {
   const bar = (w: string | number, h = 12) => <div style={{ width: w, height: h, borderRadius: 5, background: "rgba(236,231,221,0.06)", animation: "vsShimmer 1.4s ease-in-out infinite" }} />;
   return (
