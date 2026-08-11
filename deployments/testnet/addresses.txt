@@ -348,3 +348,49 @@ decimal away silently, and turned 0.00000001 into 0 — which the contract reads
 as "no limit", so the tightest possible spending cap became no cap at all.
 All three now go through toStroops. Guards prefills with xlmExact, which
 round-trips; formatXLM does not.
+
+================================================================================
+v10 + v11 — the guards, and who is allowed to satisfy them
+================================================================================
+
+Two security rounds, deployed together. WASM
+  a4f4718f57d4984457d53187e94825ac76ebc24db3d8080812cf72410209afa6
+uploaded  tx d2fbf5ec78938439222f2fbaed75e56b31013691a830ca5707997aa4965a349d
+factory   tx 2e7bedac01ee354cdddc25713b538aeb2a2fcd559e0a871a6ffa0c9582c62f70
+`get_wasm` on CA3VDWIX… now returns it, so the app's upgrade button targets v11.
+
+v10 — one signer, one approval. `approval_count` is one number, but the guards
+protecting it were three ledgers that never consulted each other:
+`approve` -> DataKey::Approval(tx_id, signer); `approve_zk` and
+`approve_zk_anon` -> DataKey::Nullifier only. A single signer reached any
+threshold three ways: two made-up nullifiers with no verifier configured (which
+is every vault the factory deploys), a transparent approval plus their own
+legitimate proof, or the same proof replayed as `n` and `n + r` since
+Bn254Fr::from_u256 reduces mod r silently. Proven in the test host first — one
+signer moved the whole balance, thief_balance=1000 — then closed and proven
+again at 0.
+
+v11 — the guards guard. A call proposal walked past every spending limit
+because the branch returned before them; the amount is now measured across the
+invocation and charged. The time-lock ran from `created_at`, so a proposal
+older than the lock settled the instant it hit threshold; it runs from the last
+approval. The cap window was an absolute bucket, so "1M per day" meant 2M
+across a boundary; it opens at the first spend. Duplicate signers were accepted
+and could strand a vault below its own threshold. SetZkConfig and
+SetSignerCommitments did not retire open proposals.
+
+Verified live on CDO5MM5RA46SQMTAIPTPRCZYJ3UGNHHUJA6D4K35ONI3N2DDZTGLEBPL
+(2-of-2, throwaway keys, no user funds):
+
+  version()                                    -> 11
+  #0 private, approve_zk(A, nullifier=170)     -> ok, count 1
+     approve_zk(A, nullifier=187)  same signer -> Error(Contract, #8)  AlreadyApproved
+     count still                               -> 1
+  #1 transparent, approve(A)                   -> ok, count 1
+     approve_zk(A, …)              same signer -> Error(Contract, #33) WrongApprovalMode
+     approve_zk_anon(…)                        -> Error(Contract, #30) VerificationNotEnabled
+     count still                               -> 1
+  create_vault(signers=[A, A, S1])             -> Error(Contract, #20) DuplicateSigner
+
+Existing vaults stay on the code they were deployed with. A vault still on v9
+now reports two gaps in the app's upgrade notice rather than one.
