@@ -68,7 +68,9 @@ const RETIRED: Symbol = symbol_short!("retired");
 ///   8 — retired proposals are visible as such, and any signer can clear them
 ///   9 — an upgrade retires them too: new code can redefine what state means
 ///  10 — one signer, one approval: the channels share a ledger and a mode
-const VERSION: u32 = 10;
+///  11 — the guards actually guard: calls are charged, the lock runs from the
+///       last approval, the cap window rolls, no duplicate signers
+const VERSION: u32 = 11;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -157,7 +159,8 @@ pub enum DataKey {
     Cancelled(u64),
     /// Items of a batch (multi-call) proposal.
     Batch(u64),
-    /// Amount executed within a rolling cap window, keyed by window index.
+    /// Unused since v11 — the cap window was keyed by absolute bucket index.
+    /// Kept so the discriminants of everything below it stay put.
     Spent(u32),
     /// The contract call a proposal performs, when it is a call rather than a
     /// transfer.
@@ -166,6 +169,12 @@ pub enum DataKey {
     CallAuth(u64),
     /// The configuration change a proposal applies, when it is an admin action.
     Admin(u64),
+    /// Ledger of the most recent approval. The time-lock runs from here, not
+    /// from creation: a lock anchored to `created_at` gives co-signers no
+    /// window at all once a proposal is older than the lock.
+    LastApproval(u64),
+    /// The cap window in force: `(ledger it opened, amount spent in it)`.
+    Window,
 }
 
 /// Owner-configurable spending guards. All-zero / false = unrestricted, which
@@ -428,6 +437,17 @@ impl VaultInstance {
         if threshold == 0 || threshold > signer_count {
             panic_with_error!(&env, Error::BadThreshold);
         }
+        // A repeat makes `signer_count` a lie — approvals dedup by address, so
+        // [A, A, B] at 2-of-3 is really 2-of-2 — and it can strand the vault:
+        // `RemoveSigner`'s guard assumes one entry goes while `apply_admin`
+        // removes every match, which can leave a threshold no set can reach.
+        for i in 0..signer_count {
+            for j in (i + 1)..signer_count {
+                if signers.get(i).unwrap() == signers.get(j).unwrap() {
+                    panic_with_error!(&env, Error::DuplicateSigner);
+                }
+            }
+        }
         let s = env.storage().instance();
         s.set(&OWNER, &owner);
         s.set(&NAME, &name);
@@ -504,6 +524,10 @@ impl VaultInstance {
             private_mode,
         );
         env.storage().persistent().set(&DataKey::Batch(tx_id), &items);
+        // The proposal's own entry is re-extended on every approval; without
+        // this its payload is not, so a batch collecting approvals for months
+        // can outlive the list of who it pays.
+        Self::bump_key(&env, &DataKey::Batch(tx_id));
         Ok(tx_id)
     }
 
@@ -549,8 +573,10 @@ impl VaultInstance {
         env.storage()
             .persistent()
             .set(&DataKey::Call(tx_id), &CallSpec { contract, function, args });
+        Self::bump_key(&env, &DataKey::Call(tx_id));
         if auth.len() > 0 {
             env.storage().persistent().set(&DataKey::CallAuth(tx_id), &auth);
+            Self::bump_key(&env, &DataKey::CallAuth(tx_id));
         }
         Ok(tx_id)
     }
@@ -597,9 +623,11 @@ impl VaultInstance {
             return Err(Error::AlreadyApproved);
         }
         env.storage().persistent().set(&DataKey::Approval(tx_id, signer.clone()), &true);
+        Self::bump_key(&env, &DataKey::Approval(tx_id, signer.clone()));
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
+        Self::note_approval(&env, tx_id);
 
         ApprovedEvent { tx_id, signer }.publish(&env);
         Ok(())
@@ -634,7 +662,7 @@ impl VaultInstance {
         }
         let policy = Self::policy_of(&env);
         if policy.timelock_ledgers > 0
-            && env.ledger().sequence() < p.created_at.saturating_add(policy.timelock_ledgers)
+            && env.ledger().sequence() < Self::unlock_at(&env, &p, &policy)
         {
             return Ok(());
         }
@@ -675,6 +703,7 @@ impl VaultInstance {
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
+        Self::note_approval(&env, tx_id);
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -725,6 +754,7 @@ impl VaultInstance {
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
+        Self::note_approval(&env, tx_id);
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -759,11 +789,9 @@ impl VaultInstance {
         let policy = Self::policy_of(&env);
 
         // time-lock: a proposal cannot execute before its cooling-off period
-        if policy.timelock_ledgers > 0 {
-            let unlock = p.created_at.saturating_add(policy.timelock_ledgers);
-            if env.ledger().sequence() < unlock {
-                return Err(Error::TimelockActive);
-            }
+        if policy.timelock_ledgers > 0 && env.ledger().sequence() < Self::unlock_at(&env, &p, &policy)
+        {
+            return Err(Error::TimelockActive);
         }
 
         // An admin action moves nothing, so the amount guards and the recipient
@@ -777,14 +805,30 @@ impl VaultInstance {
             return Ok(());
         }
 
-        // A contract call moves no amount of its own, so the amount-based
-        // guards have nothing to bite on. Its guard is the call allowlist,
-        // re-checked here in case the owner revoked the target meanwhile.
+        // A call carries no amount the vault can read up front — but it can
+        // still move money, through the callee, on the vault's own authority.
+        // The moment a token contract is on the call allowlist (which is the
+        // supported way to permit a nested pull) that is exactly what happens,
+        // and treating a call as amount-free let it walk past every limit that
+        // `propose` would have applied.
+        //
+        // So the amount is measured rather than declared: the vault's balance
+        // is read either side of the invocation and whatever left is charged
+        // against the same guards a transfer answers to. A breach returns Err,
+        // which reverts the whole transaction including the movement.
         if let Some(spec) = env.storage().persistent().get::<_, CallSpec>(&DataKey::Call(tx_id)) {
             Self::check_call_target(&env, &spec.contract)?;
 
             // Re-checked here as well: the owner may have revoked a sub-call
             // target while this sat waiting for approvals.
+            // Read before `authorize_as_current_contract` below: that call
+            // arms the authorization for the *next* invocation, and slipping a
+            // balance read in between spends it on the wrong one.
+            let token: Address = env.storage().instance().get(&TOKEN).unwrap();
+            let client = TokenClient::new(&env, &token);
+            let vault = env.current_contract_address();
+            let before = client.balance(&vault);
+
             let auth: Vec<CallSpec> = env
                 .storage()
                 .persistent()
@@ -816,6 +860,14 @@ impl VaultInstance {
             env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
 
             env.invoke_contract::<Val>(&spec.contract, &spec.function, spec.args.clone());
+
+            // Only a net outflow is charged. A call that brings funds in — a
+            // swap settling, a loan drawn — is not spending.
+            let moved = before.saturating_sub(client.balance(&vault));
+            if moved > 0 {
+                Self::check_limit(&policy, moved)?;
+                Self::charge_window(&env, &policy, moved)?;
+            }
 
             CallExecutedEvent {
                 tx_id,
@@ -961,7 +1013,7 @@ impl VaultInstance {
             executed: p.executed,
             approval_count: p.approval_count,
             threshold: env.storage().instance().get(&THRESH).unwrap(),
-            unlock_ledger: p.created_at.saturating_add(policy.timelock_ledgers),
+            unlock_ledger: Self::unlock_at(&env, &p, &policy),
             current_ledger: env.ledger().sequence(),
             is_batch: env.storage().persistent().has(&DataKey::Batch(tx_id)),
             amount: p.amount,
@@ -999,8 +1051,7 @@ impl VaultInstance {
     /// Amount already executed in the current cap window.
     pub fn spent_in_window(env: Env) -> i128 {
         let policy = Self::policy_of(&env);
-        let w = Self::window_index(&env, &policy);
-        env.storage().persistent().get(&DataKey::Spent(w)).unwrap_or(0)
+        Self::window_now(&env, &policy).1
     }
 
     pub fn is_signer(env: Env, signer: Address) -> bool {
@@ -1243,12 +1294,20 @@ impl VaultInstance {
                 s.set(&CALLOWED, &next);
                 CallTargetChangedEvent { contract: c.clone(), allowed: false }.publish(env);
             }
+            // Both of these move the ZK signer set — the root a proof is
+            // checked against, and the leaves a prover builds from. An approval
+            // proven against the old root was given by a different group, which
+            // is the same reason AddSigner and RemoveSigner retire.
             AdminAction::SetZkConfig(cfg) => {
                 s.set(&VERIFIER, cfg);
+                Self::retire_open_proposals(env);
                 ZkConfigSetEvent { by: env.current_contract_address(), config: cfg.clone() }
                     .publish(env);
             }
-            AdminAction::SetSignerCommitments(c) => s.set(&COMMITS, c),
+            AdminAction::SetSignerCommitments(c) => {
+                s.set(&COMMITS, c);
+                Self::retire_open_proposals(env);
+            }
             AdminAction::TransferOwnership(a) => {
                 let old: Address = s.get(&OWNER).unwrap();
                 s.set(&OWNER, a);
@@ -1273,6 +1332,31 @@ impl VaultInstance {
             }
         }
         Ok(())
+    }
+
+    /// Record that the count just moved, and extend the proposal's life.
+    fn note_approval(env: &Env, tx_id: u64) {
+        let k = DataKey::LastApproval(tx_id);
+        env.storage().persistent().set(&k, &env.ledger().sequence());
+        Self::bump_key(env, &k);
+    }
+
+    /// The ledger this proposal becomes executable.
+    ///
+    /// Measured from the last approval so the lock is what it claims to be: a
+    /// window between a proposal reaching its threshold and settling. Falls
+    /// back to `created_at` for proposals made before v11, which have no
+    /// recorded approval — they are already past any lock they were under.
+    fn unlock_at(env: &Env, p: &Proposal, policy: &Policy) -> u32 {
+        if policy.timelock_ledgers == 0 {
+            return 0;
+        }
+        let from: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LastApproval(p.id))
+            .unwrap_or(p.created_at);
+        from.saturating_add(policy.timelock_ledgers)
     }
 
     fn require_signer(env: &Env, who: &Address) -> Result<(), Error> {
@@ -1424,13 +1508,35 @@ impl VaultInstance {
         Err(Error::RecipientNotAllowed)
     }
 
-    fn window_index(env: &Env, policy: &Policy) -> u32 {
-        let len = if policy.cap_window_ledgers == 0 {
+    fn window_len(policy: &Policy) -> u32 {
+        if policy.cap_window_ledgers == 0 {
             DEFAULT_CAP_WINDOW
         } else {
             policy.cap_window_ledgers
-        };
-        env.ledger().sequence() / len
+        }
+    }
+
+    /// The window in force: when it opened, and how much has gone out of it.
+    ///
+    /// The window opens at the first spend and closes a full length later,
+    /// rather than sitting on an absolute `ledger / len` boundary. Fixed
+    /// buckets made a cap of "1M per day" mean "2M, if you wait for midnight":
+    /// consumption reset at every multiple of the length no matter when the
+    /// spending happened, so two executions one ledger apart either side of a
+    /// boundary both passed. Anchoring to the first spend also stops a change
+    /// to `cap_window_ledgers` from silently re-indexing the budget to zero.
+    fn window_now(env: &Env, policy: &Policy) -> (u32, i128) {
+        let (opened, spent): (u32, i128) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Window)
+            .unwrap_or((0, 0));
+        let now = env.ledger().sequence();
+        if opened == 0 || now.saturating_sub(opened) >= Self::window_len(policy) {
+            (now, 0)
+        } else {
+            (opened, spent)
+        }
     }
 
     /// Book `amount` against the current window, rejecting if it breaks the cap.
@@ -1438,14 +1544,13 @@ impl VaultInstance {
         if policy.spending_cap == 0 {
             return Ok(());
         }
-        let w = Self::window_index(env, policy);
-        let key = DataKey::Spent(w);
-        let spent: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        let (opened, spent) = Self::window_now(env, policy);
         let next = spent.checked_add(amount).ok_or(Error::ExceedsSpendingCap)?;
         if next > policy.spending_cap {
             return Err(Error::ExceedsSpendingCap);
         }
-        env.storage().persistent().set(&key, &next);
+        env.storage().persistent().set(&DataKey::Window, &(opened, next));
+        Self::bump_key(env, &DataKey::Window);
         Ok(())
     }
 }

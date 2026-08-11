@@ -2523,6 +2523,7 @@ const VERSION_GAPS: { from: number; risk: string }[] = [
   { from: 8, risk: "a proposal retired by a signer change stays in the pending list, and only its proposer can clear it" },
   { from: 6, risk: "a proposal at its threshold needs a separate Execute; it cannot settle on the final approval" },
   { from: 10, risk: "one signer can reach the threshold alone — an approval by proof is not checked against the same signer's other approvals, and on a vault without on-chain verification it is not checked at all" },
+  { from: 11, risk: "a contract call moves funds past every spending limit, the time-lock runs from when a proposal was made rather than from its final approval, and the spending cap resets on a fixed clock so twice the budget can leave either side of it" },
 ];
 
 function gapsFor(version: number): string[] {

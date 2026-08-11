@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 10);
+    assert_eq!(s.vault.version(), 11);
 }
 
 #[test]
@@ -1642,4 +1642,181 @@ fn test_public_inputs_above_the_field_modulus_are_refused() {
     );
     assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
     assert_eq!(s.token.balance(&elsewhere), 0);
+}
+
+/* ================= guards that were not guarding =================
+
+Four rules the vault documents but did not enforce. Each test asserts the
+documented behaviour, so each fails until the code catches up. */
+
+/// A call proposal moves funds through the callee, under the vault's own
+/// authority — so the amount guards have plenty to bite on.
+///
+/// The call branch returned before `check_limit`, the balance check,
+/// `check_recipient` and `charge_window`, on the premise that "a contract call
+/// moves no amount of its own". That premise dies the moment a token contract
+/// is on the call allowlist — which the vault's own tests do, to permit a
+/// nested pull. `propose` for the same movement is refused three ways.
+#[test]
+fn test_a_call_that_moves_funds_is_charged_against_the_limits() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.admin(AdminAction::AllowContract(s.token.address.clone()));
+    s.set_policy(Policy {
+        max_per_tx: 1_000,
+        spending_cap: 0,
+        cap_window_ledgers: 0,
+        timelock_ledgers: 0,
+        allowlist_only: false,
+    });
+
+    let elsewhere = Address::generate(&s.env);
+    let args = vec![
+        &s.env,
+        s.vault_addr.into_val(&s.env),
+        elsewhere.into_val(&s.env),
+        9_000i128.into_val(&s.env),
+    ];
+    let tx = s.vault.propose_call(
+        &s.signer(0),
+        &s.token.address,
+        &Symbol::new(&s.env, "transfer"),
+        &args,
+        &Vec::new(&s.env),
+        &false,
+    );
+    s.vault.approve(&tx, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::ExceedsMaxPerTx)),
+        "9,000 out through a call is still 9,000 out"
+    );
+    assert_eq!(s.token.balance(&elsewhere), 0);
+    assert_eq!(s.vault.get_balance(), 10_000);
+}
+
+/// The time-lock is meant to give co-signers a window to notice a proposal
+/// before it can settle, so it has to run from the last approval.
+///
+/// Anchored to `created_at`, it gave no window at all: a proposal older than
+/// the lock executed the instant it reached the threshold. An attacker holding
+/// one key proposes an `Upgrade` on day 0 — nobody else can cancel it, since a
+/// live proposal is cancellable only by its proposer — waits out the lock, and
+/// on the day they obtain the remaining keys, approves and executes in one
+/// transaction.
+#[test]
+fn test_the_timelock_runs_from_the_final_approval() {
+    let s = setup(2);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    s.set_policy(Policy {
+        max_per_tx: 0,
+        spending_cap: 0,
+        cap_window_ledgers: 0,
+        timelock_ledgers: 100,
+        allowlist_only: false,
+    });
+
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &500, &false);
+
+    // the proposal sits far longer than the lock, untouched
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 5_000);
+
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve(&tx, &s.signer(1)); // threshold reached, right now
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::TimelockActive)),
+        "reaching the threshold starts the clock, it does not skip it"
+    );
+
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 101);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&to), 500);
+}
+
+/// A duplicated signer makes `signer_count` a lie and can brick the vault.
+///
+/// Approvals dedup by address, so `[A, A, B]` at 2-of-3 is really 2-of-2. Then
+/// `RemoveSigner(A)` passes its guard — which assumes one entry disappears —
+/// and removes both, leaving one signer under a threshold of two. Nothing can
+/// reach the threshold again, including the `SetThreshold` that would fix it,
+/// so the balance is frozen for good.
+#[test]
+#[should_panic] // the constructor cannot return Err, so it panics like the other two
+fn test_duplicate_signers_are_refused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin);
+    let owner = Address::generate(&env);
+    let other = Address::generate(&env);
+    let dupes = vec![&env, owner.clone(), owner.clone(), other];
+
+    env.register(
+        VaultInstance,
+        (owner, String::from_str(&env, "dupes"), sac.address(), dupes, 2u32),
+    );
+}
+
+/// The spending cap is documented as a rolling budget, so it cannot be doubled
+/// by waiting for a boundary.
+///
+/// Keyed on `ledger / len`, the windows were fixed absolute buckets: spending
+/// reset to zero at every multiple of the length regardless of when it
+/// happened. Two executions five seconds apart, one either side of the
+/// boundary, spent twice the daily cap.
+#[test]
+fn test_spending_cap_cannot_be_doubled_across_a_boundary() {
+    let s = setup(1);
+    s.token_admin.mint(&s.vault_addr, &10_000);
+    s.set_policy(Policy {
+        max_per_tx: 0,
+        spending_cap: 1_000,
+        cap_window_ledgers: 100,
+        timelock_ledgers: 0,
+        allowlist_only: false,
+    });
+
+    let to = Address::generate(&s.env);
+    // land the first execution just before a bucket boundary
+    let now = s.env.ledger().sequence();
+    s.env.ledger().set_sequence_number(now + (100 - now % 100) - 1);
+
+    let a = s.vault.propose(&s.signer(0), &to, &1_000, &false);
+    s.vault.approve(&a, &s.signer(0));
+    s.vault.execute(&a, &s.signer(0));
+    assert_eq!(s.token.balance(&to), 1_000);
+
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 1); // one ledger later
+    let b = s.vault.propose(&s.signer(0), &to, &1_000, &false);
+    s.vault.approve(&b, &s.signer(0));
+    assert_eq!(
+        s.vault.try_execute(&b, &s.signer(0)),
+        Err(Ok(Error::ExceedsSpendingCap)),
+        "the budget is per window elapsed, not per bucket crossed"
+    );
+    assert_eq!(s.token.balance(&to), 1_000);
+}
+
+/// Changing who can prove membership changes the signer set, so it retires the
+/// proposals decided under the old one — exactly as add/remove does.
+///
+/// `retire_open_proposals` was wired to AddSigner, RemoveSigner and Upgrade but
+/// not to the two actions that move the ZK signer set, so approvals proven
+/// against a replaced Merkle root kept counting.
+#[test]
+fn test_changing_the_zk_signer_set_retires_open_proposals() {
+    let s = setup(1);
+    let tx = s.vault.propose(&s.signer(0), &Address::generate(&s.env), &10, &false);
+
+    let mut leaves = Vec::new(&s.env);
+    leaves.push_back(U256::from_u32(&s.env, 1234));
+    s.admin(AdminAction::SetSignerCommitments(leaves));
+
+    assert!(s.vault.retired_before() > tx, "the old root decided that proposal");
+    assert_eq!(
+        s.vault.try_approve(&tx, &s.signer(0)),
+        Err(Ok(Error::SignerSetChanged))
+    );
 }
