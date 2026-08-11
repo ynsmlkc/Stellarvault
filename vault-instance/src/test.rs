@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 12);
+    assert_eq!(s.vault.version(), 13);
 }
 
 #[test]
@@ -1986,4 +1986,69 @@ fn test_removing_a_signer_can_never_strand_the_threshold() {
         "checked against what the set actually becomes"
     );
     assert_eq!(s.vault.get_config().signer_count, 2);
+}
+
+/* ================= the clock the time-lock runs on ================= */
+
+/// Approving after a proposal has passed must not push its settlement back.
+///
+/// The lock was restamped on every approval, so on a vault with more signers
+/// than its threshold each surplus approval bought another full lock period.
+/// That turns approving — the one thing a signer is meant to do — into a delay
+/// mechanism: a signer who cannot block a proposal can postpone it at will.
+#[test]
+fn test_a_later_approval_does_not_restart_the_timelock() {
+    let s = setup(2); // 2 of 3
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 0, cap_window_ledgers: 0, timelock_ledgers: 100, allowlist_only: false });
+
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &500, &false);
+    s.vault.approve(&tx, &s.signer(0));
+    s.vault.approve(&tx, &s.signer(1)); // passed here — the clock starts here
+    let passed_at = s.env.ledger().sequence();
+
+    s.env.ledger().set_sequence_number(passed_at + 50);
+    s.vault.approve(&tx, &s.signer(2)); // a third opinion, not a new clock
+
+    s.env.ledger().set_sequence_number(passed_at + 101);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&to), 500);
+}
+
+/// Lowering the threshold cannot hand a waiting proposal an expired clock.
+///
+/// The lock exists to give co-signers a window between a proposal passing and
+/// settling. A proposal that never reached its threshold has no such moment
+/// recorded — so when the threshold drops to meet its stale approval count, it
+/// passed and became executable in the same instant, months after anyone last
+/// looked at it.
+#[test]
+fn test_lowering_the_threshold_starts_the_clock_again() {
+    let s = setup(2); // 2 of 3
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    s.set_policy(Policy { max_per_tx: 0, spending_cap: 0, cap_window_ledgers: 0, timelock_ledgers: 100, allowlist_only: false });
+
+    let to = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &to, &500, &false);
+    s.vault.approve(&tx, &s.signer(0)); // 1 of 2 — never passed
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 5_000);
+
+    // drop to 1-of-3; the rule change waits out its own lock
+    let ch = s.vault.propose_admin(&s.signer(0), &AdminAction::SetThreshold(1));
+    s.vault.approve(&ch, &s.signer(0));
+    s.vault.approve(&ch, &s.signer(1));
+    s.env.ledger().set_sequence_number(s.env.ledger().sequence() + 101);
+    s.vault.execute(&ch, &s.signer(0));
+    let changed_at = s.env.ledger().sequence();
+
+    // the old proposal now meets the threshold — but not the clock
+    assert_eq!(
+        s.vault.try_execute(&tx, &s.signer(0)),
+        Err(Ok(Error::TimelockActive)),
+        "it passed the moment the threshold moved, so that is when the window opens"
+    );
+    s.env.ledger().set_sequence_number(changed_at + 101);
+    s.vault.execute(&tx, &s.signer(0));
+    assert_eq!(s.token.balance(&to), 500);
 }

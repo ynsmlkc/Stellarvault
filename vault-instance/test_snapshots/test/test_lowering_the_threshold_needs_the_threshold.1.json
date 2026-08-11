@@ -528,6 +528,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "thchg"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "thresh"
                       },
                       "val": {

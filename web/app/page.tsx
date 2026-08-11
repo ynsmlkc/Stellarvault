@@ -2583,6 +2583,7 @@ const VERSION_GAPS: { from: number; risk: string }[] = [
   { from: 10, risk: "one signer can reach the threshold alone — an approval by proof is not checked against the same signer's other approvals, and on a vault without on-chain verification it is not checked at all" },
   { from: 11, risk: "a contract call moves funds past every spending limit, the time-lock runs from when a proposal was made rather than from its final approval, and the spending cap resets on a fixed clock so twice the budget can leave either side of it" },
   { from: 12, risk: "a contract call can pay an address the allowlist refuses, the spending cap can be doubled either side of a window boundary, and upgrading the vault refills a budget it had already spent" },
+  { from: 13, risk: "the time-lock restarts on every approval, so a signer who cannot block a proposal can postpone it by approving it — and a proposal that passes because the threshold was lowered gets no waiting period at all" },
 ];
 
 function gapsFor(version: number): string[] {

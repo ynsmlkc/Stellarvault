@@ -56,6 +56,14 @@ const COMMITS: Symbol = symbol_short!("commits");
 /// boundary is a single id. Nothing is written per proposal, nothing is read
 /// per proposal, and the UI learns which are dead from one number.
 const RETIRED: Symbol = symbol_short!("retired");
+/// Ledger the threshold last changed on.
+///
+/// A proposal that never reached its old threshold has no moment of passing
+/// recorded, so when the threshold drops to meet its stale approval count it
+/// passes and becomes executable in the same instant. One number for the whole
+/// vault answers it without touching a single proposal: whichever came later,
+/// the proposal passing or the rule moving, is when the window opens.
+const THCHG: Symbol = symbol_short!("thchg");
 
 /// Contract code version, so the dashboard can tell what a vault can do:
 ///   1 — pre-guards (no `version` entry point at all)
@@ -73,7 +81,9 @@ const RETIRED: Symbol = symbol_short!("retired");
 ///  12 — v11's half-fixes finished: a call answers to the allowlist too, the
 ///       cap window slides instead of stepping, removal counts the set it
 ///       leaves behind
-const VERSION: u32 = 12;
+///  13 — the time-lock runs on the right clock: it starts when a proposal
+///       passes, not on every approval after, and a threshold change reopens it
+const VERSION: u32 = 13;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -631,7 +641,7 @@ impl VaultInstance {
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
-        Self::note_approval(&env, tx_id);
+        Self::note_approval(&env, tx_id, p.approval_count);
 
         ApprovedEvent { tx_id, signer }.publish(&env);
         Ok(())
@@ -656,6 +666,12 @@ impl VaultInstance {
     /// expired — this records the approval and stops. That is the whole point of
     /// the check: executing here on a proposal that cannot execute would fail
     /// the transaction and roll the approval back with it.
+    ///
+    /// Note that a vault with a time-lock never settles here, and should not:
+    /// the clock starts on the approval that passes the proposal, so at this
+    /// moment there is always time left to wait. A lock means precisely that
+    /// the final approver cannot also be the one who settles it. On such a
+    /// vault this entry point is `approve`, and someone executes later.
     pub fn approve_and_execute(env: Env, tx_id: u64, signer: Address) -> Result<(), Error> {
         Self::approve(env.clone(), tx_id, signer.clone())?;
 
@@ -707,7 +723,7 @@ impl VaultInstance {
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
-        Self::note_approval(&env, tx_id);
+        Self::note_approval(&env, tx_id, p.approval_count);
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -758,7 +774,7 @@ impl VaultInstance {
         p.approval_count += 1;
         env.storage().persistent().set(&DataKey::Proposal(tx_id), &p);
         Self::bump_key(&env, &DataKey::Proposal(tx_id));
-        Self::note_approval(&env, tx_id);
+        Self::note_approval(&env, tx_id, p.approval_count);
 
         ZKApprovedEvent { tx_id, nullifier: zk.nullifier }.publish(&env);
         Ok(())
@@ -1256,7 +1272,14 @@ impl VaultInstance {
         Self::check_admin(env, action)?;
         let s = env.storage().instance();
         match action {
-            AdminAction::SetThreshold(t) => s.set(&THRESH, t),
+            AdminAction::SetThreshold(t) => {
+                s.set(&THRESH, t);
+                // deliberately does not retire — a threshold change does not
+                // invalidate the approvals already given, it only changes how
+                // many are needed. It does reopen the time-lock window, since
+                // proposals can pass on it without anyone approving anything.
+                s.set(&THCHG, &env.ledger().sequence());
+            }
             AdminAction::AddSigner(a) => {
                 let mut signers: Vec<Address> = s.get(&SIGNERS).unwrap();
                 signers.push_back(a.clone());
@@ -1360,11 +1383,19 @@ impl VaultInstance {
         Ok(())
     }
 
-    /// Record that the count just moved, and extend the proposal's life.
-    fn note_approval(env: &Env, tx_id: u64) {
-        let k = DataKey::LastApproval(tx_id);
-        env.storage().persistent().set(&k, &env.ledger().sequence());
-        Self::bump_key(env, &k);
+    /// Record the moment a proposal passed, and extend its life.
+    ///
+    /// Stamped on the approval that *reaches* the threshold, not on every one
+    /// after it. Restamping made each surplus approval buy another full lock
+    /// period, so on a vault with more signers than its threshold a dissenting
+    /// signer could postpone a passed proposal indefinitely by approving it.
+    fn note_approval(env: &Env, tx_id: u64, count: u32) {
+        let threshold: u32 = env.storage().instance().get(&THRESH).unwrap();
+        if count == threshold {
+            let k = DataKey::LastApproval(tx_id);
+            env.storage().persistent().set(&k, &env.ledger().sequence());
+            Self::bump_key(env, &k);
+        }
     }
 
     /// The ledger this proposal becomes executable.
@@ -1377,12 +1408,15 @@ impl VaultInstance {
         if policy.timelock_ledgers == 0 {
             return 0;
         }
-        let from: u32 = env
+        let passed: u32 = env
             .storage()
             .persistent()
             .get(&DataKey::LastApproval(p.id))
             .unwrap_or(p.created_at);
-        from.saturating_add(policy.timelock_ledgers)
+        // whichever came later: the proposal passing, or the rule that decides
+        // what passing means
+        let moved: u32 = env.storage().instance().get(&THCHG).unwrap_or(0);
+        passed.max(moved).saturating_add(policy.timelock_ledgers)
     }
 
     fn require_signer(env: &Env, who: &Address) -> Result<(), Error> {
