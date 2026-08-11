@@ -16,7 +16,25 @@ html, body {
 ::-webkit-scrollbar-thumb:hover { background: #3a362d; }
 
 input::placeholder { color: #5a564d; }
-input:focus { outline: none; }
+
+/* ---------------- keyboard focus ----------------
+   `input:focus { outline: none }` used to live here with nothing in its place,
+   which left every field on Guards, Propose and Hidden amounts invisible to
+   anyone moving by Tab: the cursor lands somewhere and the screen says
+   nothing. The browser default was removed for a fair reason — a blue ring
+   does not belong in this palette — but removing is not replacing.
+
+   `:focus-visible` rather than `:focus` is what makes this affordable: the
+   browser only matches it when focus arrived by keyboard, so a mouse click
+   draws no ring and there is nothing to want to delete again. */
+input:focus, textarea:focus, select:focus, button:focus, a:focus, [tabindex]:focus { outline: none; }
+input:focus-visible, textarea:focus-visible, select:focus-visible,
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  /* the ring follows whatever radius the element already has — it must not
+     set one, or a pill would square off the moment you tabbed to it */
+  outline: 2px solid rgba(201, 168, 106, 0.65);
+  outline-offset: 2px;
+}
 
 @keyframes vsGlow { 0%,100% { opacity:.45; transform:scale(1); } 50% { opacity:.8; transform:scale(1.04); } }
 @keyframes vsSpin { to { transform: rotate(360deg); } }
@@ -125,4 +143,21 @@ input:focus { outline: none; }
 @media (max-width: 480px) {
   .vh1 { font-size: 36px !important; }
   .vsec { padding-left: 16px !important; padding-right: 16px !important; }
+}
+
+/* ---------------- reduced motion ----------------
+   Three of the seven keyframes above run `infinite` — the hero glow breathing,
+   the orbital rings turning, the skeleton shimmer. For a viewer who gets
+   motion sick or is distracted by movement, "always, forever" is the worst
+   case. The system already knows their answer; nothing was asking.
+
+   Transitions collapse rather than vanish: 0.01ms keeps state changes
+   instantaneous without breaking anything that waits on transitionend. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
