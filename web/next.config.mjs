@@ -14,8 +14,17 @@ const crossOriginIsolation = [
   { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
 ];
 
+/**
+ * `next build` writes to the same `.next` the dev server is serving from, so
+ * building while `next dev` runs replaces its chunks and the running page then
+ * 404s its own CSS and JS — a white page with dead buttons, and no error to
+ * explain it. Builds go to their own directory instead.
+ */
+const distDir = process.env.NEXT_DIST_DIR || ".next";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir,
   reactStrictMode: true,
   transpilePackages: ["@ctd/sdk"],
   async headers() {

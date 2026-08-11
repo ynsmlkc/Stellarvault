@@ -11,7 +11,8 @@
     "predev": "node scripts/vendor-bb.mjs",
     "prebuild": "node scripts/vendor-bb.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:check": "NEXT_DIST_DIR=.next-build next build"
   },
   "dependencies": {
     "@aztec/bb.js": "^0.87.0",

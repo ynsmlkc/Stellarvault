@@ -45,5 +45,5 @@ jobs:
         working-directory: web
 
       - name: Build
-        run: npm run build
+        run: npm run build:check
         working-directory: web
