@@ -71,6 +71,21 @@ const DISPLAY = "'Newsreader',serif";
 const SANS = "'Hanken Grotesk',sans-serif";
 const MONO = "'JetBrains Mono',monospace";
 
+/**
+ * The type scale and the corner radii.
+ *
+ * This file had 28 distinct font sizes — including 10.5, 11.5, 12.5 and 13.5,
+ * which are the fingerprint of nudging a value until it looked right rather
+ * than choosing from a set — and 20 distinct radii, five of them inside a
+ * single 400px-tall region of the vault screen. Nothing was wrong with any one
+ * of them; the absence of a system is what read as unconsidered.
+ *
+ * Seven sizes and three radii. A value that is not here does not belong.
+ */
+const T = { xs: 11, sm: 13, base: 15, lg: 18, xl: 24, xxl: 34, hero: 84 } as const;
+const R = { control: 6, card: 14, pill: 100 } as const;
+
+
 const GRAD_A = "linear-gradient(135deg,#C9A86A,#8a6f3e)";
 const GRAD_B = "linear-gradient(135deg,#bda07f,#6f5b3d)";
 const GRAD_C = "linear-gradient(135deg,#a99272,#5e4e34)";
@@ -132,7 +147,7 @@ function Avatar({ letter, grad, size = 26, border, ml = 0, muted = false }: { le
 function LogoMark({ size = 30 }: { size?: number }) {
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", border: "1.5px solid #C9A86A", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-      <div style={{ width: size > 28 ? 8 : 7, height: size > 28 ? 8 : 7, borderRadius: 2, background: "#C9A86A" }} />
+      <div style={{ width: size > 28 ? 8 : 7, height: size > 28 ? 8 : 7, borderRadius: R.control, background: "#C9A86A" }} />
       {size > 28 && <div style={{ position: "absolute", inset: 5, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.35)" }} />}
     </div>
   );
@@ -140,12 +155,12 @@ function LogoMark({ size = 30 }: { size?: number }) {
 
 function Row({ label, value, valueNode, valueNote, mono }: { label: string; value?: string; valueNode?: React.ReactNode; valueNote?: string; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, alignItems: "baseline", gap: 12 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: T.base, alignItems: "baseline", gap: 12 }}>
       <span style={{ color: "#8A857B" }}>{label}</span>
       {valueNode ?? (
         <span style={{ textAlign: "right" }}>
           <span style={{ fontFamily: mono ? MONO : SANS, color: "#ECE7DD" }}>{value}</span>
-          {valueNote && <span style={{ display: "block", fontSize: 11.5, color: "#8A857B", marginTop: 3 }}>{valueNote}</span>}
+          {valueNote && <span style={{ display: "block", fontSize: T.xs, color: "#8A857B", marginTop: 3 }}>{valueNote}</span>}
         </span>
       )}
     </div>
@@ -155,7 +170,7 @@ function Blurred({ children }: { children: React.ReactNode }) {
   return <span style={{ fontFamily: MONO, color: "#6f6a60", filter: "blur(7px)", userSelect: "none" }}>{children}</span>;
 }
 function Pill({ children }: { children: React.ReactNode }) {
-  return <span style={{ border: "1px solid rgba(236,231,221,0.14)", borderRadius: 6, padding: "4px 8px" }}>{children}</span>;
+  return <span style={{ border: "1px solid rgba(236,231,221,0.14)", borderRadius: R.control, padding: "4px 8px" }}>{children}</span>;
 }
 
 /* ============================ page ============================ */
@@ -882,7 +897,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
         <div style={{ position: "absolute", inset: 285, borderRadius: "50%", border: "2px solid rgba(201,168,106,0.24)", boxShadow: "inset 0 0 60px rgba(201,168,106,0.08)" }} />
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ width: 54, height: 54, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.5)", display: "flex", alignItems: "center", justifyContent: "center", background: "#0d0d0e" }}>
-            <div style={{ width: 14, height: 14, borderRadius: 3, background: "#C9A86A", boxShadow: "0 0 24px rgba(201,168,106,0.7)" }} />
+            <div style={{ width: 14, height: 14, borderRadius: R.control, background: "#C9A86A", boxShadow: "0 0 24px rgba(201,168,106,0.7)" }} />
           </div>
         </div>
       </div>
@@ -890,35 +905,35 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
       <div className="vsec" style={{ position: "relative", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "26px 48px", maxWidth: 1340, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <LogoMark />
-          <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: 14, color: "#ECE7DD" }}>STELLAR&nbsp;VAULT</span>
+          <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: T.base, color: "#ECE7DD" }}>STELLAR&nbsp;VAULT</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
-          <div className="vnav-links" style={{ display: "flex", gap: 30, fontSize: 14, color: "#8A857B" }}>
+          <div className="vnav-links" style={{ display: "flex", gap: 30, fontSize: T.base, color: "#8A857B" }}>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("product")}>Product</span>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("privacy")}>Privacy</span>
             <span className="h-navtext" style={{ cursor: "pointer" }} onClick={() => scrollTo("docs")}>Docs</span>
           </div>
-          <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "11px 18px", border: "none", borderRadius: 8, cursor: "pointer", boxShadow: "0 6px 24px rgba(201,168,106,0.22)" }}>Get Started <span style={{ fontSize: 15 }}>↗</span></button>
+          <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: "11px 18px", border: "none", borderRadius: R.control, cursor: "pointer", boxShadow: "0 6px 24px rgba(201,168,106,0.22)" }}>Get Started <span style={{ fontSize: T.base }}>↗</span></button>
         </div>
       </div>
 
       <div className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "96px 48px 60px" }}>
         <div style={{ maxWidth: 820 }}>
-          <div className="vs-rise" style={{ display: "inline-flex", alignItems: "center", gap: 10, border: "1px solid rgba(201,168,106,0.28)", borderRadius: 100, padding: "7px 14px", fontFamily: MONO, fontSize: 11, letterSpacing: ".18em", color: "#C9A86A", marginBottom: 34 }}>
+          <div className="vs-rise" style={{ display: "inline-flex", alignItems: "center", gap: 10, border: "1px solid rgba(201,168,106,0.28)", borderRadius: R.pill, padding: "7px 14px", fontFamily: MONO, fontSize: T.xs, letterSpacing: ".18em", color: "#C9A86A", marginBottom: 34 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069", animation: "vsPulseDot 2s ease-in-out infinite" }} />
             STELLAR · SOROBAN · ZERO-KNOWLEDGE
           </div>
-          <h1 className="vs-rise vh1" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 84, lineHeight: 1.02, letterSpacing: "-0.02em", color: "#ECE7DD", marginBottom: 30 }}>
+          <h1 className="vs-rise vh1" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.hero, lineHeight: 1.02, letterSpacing: "-0.02em", color: "#ECE7DD", marginBottom: 30 }}>
             The first <span style={{ fontStyle: "italic", color: "#C9A86A" }}>confidential</span> multi-sig treasury on Stellar.
           </h1>
-          <p className="vs-rise" style={{ fontSize: 19, lineHeight: 1.6, color: "#8A857B", maxWidth: 560, marginBottom: 42 }}>
+          <p className="vs-rise" style={{ fontSize: T.lg, lineHeight: 1.6, color: "#8A857B", maxWidth: 560, marginBottom: 42 }}>
             Approve as a team. Reveal nothing. Every transaction runs <span style={{ color: "#ECE7DD" }}>transparent</span> for the world to audit — or <span style={{ color: "#ECE7DD" }}>private</span>, where signer identities, amounts and recipients stay sealed behind zero-knowledge proofs.
           </p>
           <div className="vs-rise vrow-wrap" style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 16, padding: "15px 28px", border: "none", borderRadius: 9, cursor: "pointer", boxShadow: "0 8px 30px rgba(201,168,106,0.26)" }}>Get Started <span>↗</span></button>
-            <button onClick={() => scrollTo("product")} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: 16, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, cursor: "pointer" }}>See how it works ↓</button>
+            <button onClick={onConnect} className="h-goldbtn h-lift" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: "15px 28px", border: "none", borderRadius: R.control, cursor: "pointer", boxShadow: "0 8px 30px rgba(201,168,106,0.26)" }}>Get Started <span>↗</span></button>
+            <button onClick={() => scrollTo("product")} className="h-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "transparent", color: "#ECE7DD", fontFamily: SANS, fontWeight: 500, fontSize: T.base, padding: "15px 24px", border: "1px solid rgba(236,231,221,0.16)", borderRadius: R.control, cursor: "pointer" }}>See how it works ↓</button>
           </div>
-          <div className="vs-rise vstats" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: 12, color: "#5a564d" }}>
+          <div className="vs-rise vstats" style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56, fontFamily: MONO, fontSize: T.sm, color: "#5a564d" }}>
             <div><span style={{ color: "#8A857B" }}>CONTRACT</span> &nbsp;{shortContract(CONFIG.factoryId)}</div>
             <div style={{ width: 1, height: 14, background: "rgba(236,231,221,0.12)" }} />
             <div><span style={{ color: "#8A857B" }}>NETWORK</span> &nbsp;Testnet · live</div>
@@ -930,8 +945,8 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
 
       <div id="product" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 30px", scrollMarginTop: 24 }}>
         <div style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, marginBottom: 36 }}>
-          <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>HOW IT WORKS</div>
-          <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD", maxWidth: 620 }}>From zero to a confidential treasury in three steps.</h2>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>HOW IT WORKS</div>
+          <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, letterSpacing: "-0.01em", color: "#ECE7DD", maxWidth: 620 }}>From zero to a confidential treasury in three steps.</h2>
         </div>
         <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 22, marginBottom: 26 }}>
           {[
@@ -939,10 +954,10 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
             { n: "02", t: "Propose & approve", d: "Anyone proposes a transfer. Co-signers approve — transparently (name on-chain) or privately, where a zero-knowledge proof proves a valid signer approved without revealing who." },
             { n: "03", t: "Execute", d: "Once the threshold is met, any signer executes. Real XLM moves from the vault — and in private mode the chain never learns who approved." },
           ].map((s) => (
-            <div key={s.n} className="h-card" style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#101010", padding: 26 }}>
-              <div style={{ fontFamily: MONO, fontSize: 12, color: "#C9A86A", marginBottom: 16 }}>{s.n}</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD", marginBottom: 10 }}>{s.t}</div>
-              <div style={{ fontSize: 13.5, color: "#8A857B", lineHeight: 1.6 }}>{s.d}</div>
+            <div key={s.n} className="h-card" style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#101010", padding: 26 }}>
+              <div style={{ fontFamily: MONO, fontSize: T.sm, color: "#C9A86A", marginBottom: 16 }}>{s.n}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD", marginBottom: 10 }}>{s.t}</div>
+              <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.6 }}>{s.d}</div>
             </div>
           ))}
         </div>
@@ -953,9 +968,9 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
             ["ZK voter privacy", "Hide who approved (Groth16, verified on-chain)"],
             ["Confidential balances", "Hide amounts, on a SEP-41 standard"],
           ].map(([t, d]) => (
-            <div key={t} style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: "16px 18px" }}>
-              <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 4 }}>{t}</div>
-              <div style={{ fontSize: 12, color: "#8A857B", lineHeight: 1.5 }}>{d}</div>
+            <div key={t} style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: R.card, background: "#0d0d0e", padding: "16px 18px" }}>
+              <div style={{ fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 4 }}>{t}</div>
+              <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.5 }}>{d}</div>
             </div>
           ))}
         </div>
@@ -964,17 +979,17 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
       <div id="privacy" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "60px 48px 110px", scrollMarginTop: 24 }}>
         <div className="vwrap-head" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30, borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40 }}>
           <div>
-            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>THE SAME LEDGER, TWO STATES</div>
-            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 40, letterSpacing: "-0.01em", color: "#ECE7DD" }}>Same security. Different privacy.</h2>
+            <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>THE SAME LEDGER, TWO STATES</div>
+            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, letterSpacing: "-0.01em", color: "#ECE7DD" }}>Same security. Different privacy.</h2>
           </div>
-          <p style={{ maxWidth: 300, fontSize: 14, color: "#8A857B", textAlign: "right" }}>One vault, one threshold. You decide — per transaction — what the chain is allowed to see.</p>
+          <p style={{ maxWidth: 300, fontSize: T.base, color: "#8A857B", textAlign: "right" }}>One vault, one threshold. You decide — per transaction — what the chain is allowed to see.</p>
         </div>
         <div className="vgrid2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 16, background: "linear-gradient(180deg,#16150f,#121210)", padding: 30, overflow: "hidden" }}>
+          <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: R.card, background: "linear-gradient(180deg,#16150f,#121210)", padding: 30, overflow: "hidden" }}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#C9A86A" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 12px #C9A86A" }} />TRANSPARENT</span>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>RECEIPT #4471</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: T.base, color: "#C9A86A" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 12px #C9A86A" }} />TRANSPARENT</span>
+              <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d" }}>RECEIPT #4471</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Row label="Approved by" value="Alice · Bob · Carol" />
@@ -983,13 +998,13 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
               <div style={{ height: 1, background: "rgba(236,231,221,0.08)", margin: "4px 0" }} />
               <Row label="Status" valueNode={<span style={{ color: "#7FB069", fontWeight: 600 }}>Settled on-chain</span>} />
             </div>
-            <div style={{ marginTop: 24, fontSize: 13, color: "#8A857B", lineHeight: 1.5 }}>Every detail is publicly verifiable. The classic bank statement — fully auditable.</div>
+            <div style={{ marginTop: 24, fontSize: T.sm, color: "#8A857B", lineHeight: 1.5 }}>Every detail is publicly verifiable. The classic bank statement — fully auditable.</div>
           </div>
-          <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 16, background: "linear-gradient(180deg,#101010,#0c0c0d)", padding: 30, overflow: "hidden" }}>
+          <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, background: "linear-gradient(180deg,#101010,#0c0c0d)", padding: 30, overflow: "hidden" }}>
             <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.018) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14, color: "#8A857B" }}>🕶 ANONYMOUS APPROVALS</span>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>RECEIPT #4472</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: T.base, color: "#8A857B" }}>🕶 ANONYMOUS APPROVALS</span>
+              <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#46433c" }}>RECEIPT #4472</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Row label="Approved by" valueNode={<span style={{ color: "#8A857B" }}>🔒 3 valid signatures</span>} />
@@ -998,7 +1013,7 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
               <div style={{ height: 1, background: "rgba(236,231,221,0.06)", margin: "4px 0" }} />
               <Row label="Status" valueNode={<span style={{ color: "#ECE7DD", fontWeight: 600 }}>Confidential · settled</span>} />
             </div>
-            <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>
+            <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>
               <Pill>nullifier 0x9f…c1a4</Pill><Pill>Groth16 ✓</Pill>
             </div>
           </div>
@@ -1008,8 +1023,8 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
       <div id="docs" className="vsec" style={{ position: "relative", zIndex: 4, maxWidth: 1340, margin: "0 auto", padding: "20px 48px 100px", scrollMarginTop: 24 }}>
         <div className="vgridD" style={{ borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 40, display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48 }}>
           <div>
-            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>UNDER THE HOOD</div>
-            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
+            <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".2em", color: "#C9A86A", marginBottom: 12 }}>UNDER THE HOOD</div>
+            <h2 className="vh2" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, letterSpacing: "-0.01em", color: "#ECE7DD", marginBottom: 20 }}>Real contracts. Real proofs.</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
               {[
                 ["Smart-contract vault", "Soroban (Rust, SDK 27) — not native multi-sig, so it can run custom logic native accounts can't."],
@@ -1019,28 +1034,28 @@ function Landing({ onConnect, onVault, balance }: { onConnect: () => void; onVau
               ].map(([t, d]) => (
                 <div key={t} style={{ display: "flex", gap: 12 }}>
                   <span style={{ color: "#C9A86A", marginTop: 2 }}>▹</span>
-                  <div><span style={{ color: "#ECE7DD", fontWeight: 600, fontSize: 14 }}>{t}</span> <span style={{ color: "#8A857B", fontSize: 13.5, lineHeight: 1.55 }}>— {d}</span></div>
+                  <div><span style={{ color: "#ECE7DD", fontWeight: 600, fontSize: T.base }}>{t}</span> <span style={{ color: "#8A857B", fontSize: T.sm, lineHeight: 1.55 }}>— {d}</span></div>
                 </div>
               ))}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <a href="https://github.com/ynsmlkc/Stellarvault" target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: "16px 18px", color: "#ECE7DD" }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Source on GitHub</span><span style={{ color: "#8A857B" }}>↗</span>
+            <a href="https://github.com/ynsmlkc/Stellarvault" target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.card, padding: "16px 18px", color: "#ECE7DD" }}>
+              <span style={{ fontSize: T.base, fontWeight: 600 }}>Source on GitHub</span><span style={{ color: "#8A857B" }}>↗</span>
             </a>
-            <a href={contractExplorerUrl(CONFIG.factoryId)} target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: "16px 18px", color: "#ECE7DD" }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Factory on stellar.expert</span><span style={{ color: "#8A857B" }}>↗</span>
+            <a href={contractExplorerUrl(CONFIG.factoryId)} target="_blank" rel="noopener noreferrer" className="h-kit" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.card, padding: "16px 18px", color: "#ECE7DD" }}>
+              <span style={{ fontSize: T.base, fontWeight: 600 }}>Factory on stellar.expert</span><span style={{ color: "#8A857B" }}>↗</span>
             </a>
-            <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 12, background: "#0d0d0e", padding: 18, marginTop: 4 }}>
-              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#5a564d", marginBottom: 10 }}>STACK</div>
-              <div style={{ fontFamily: MONO, fontSize: 12, color: "#8A857B", lineHeight: 1.9 }}>Soroban SDK 27 · circom + circomlib<br />snarkjs Groth16 (BN254)<br />Next.js 14 · Freighter · Protocol 27</div>
+            <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: R.card, background: "#0d0d0e", padding: 18, marginTop: 4 }}>
+              <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#5a564d", marginBottom: 10 }}>STACK</div>
+              <div style={{ fontFamily: MONO, fontSize: T.sm, color: "#8A857B", lineHeight: 1.9 }}>Soroban SDK 27 · circom + circomlib<br />snarkjs Groth16 (BN254)<br />Next.js 14 · Freighter · Protocol 27</div>
             </div>
           </div>
         </div>
       </div>
 
       <div className="vsec" style={{ position: "relative", zIndex: 4, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "30px 48px" }}>
-        <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13, color: "#5a564d" }}>
+        <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: T.sm, color: "#5a564d" }}>
           <span style={{ letterSpacing: ".14em" }}>STELLAR&nbsp;VAULT</span>
           <span style={{ fontFamily: MONO }}>© 2026 · Built on Soroban testnet</span>
         </div>
@@ -1056,20 +1071,20 @@ function Connect({ onBack, onConnect, connecting }: { onBack: () => void; onConn
       <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 640, height: 640, borderRadius: "50%", background: "radial-gradient(circle,rgba(201,168,106,0.14),transparent 65%)", filter: "blur(10px)", animation: "vsGlow 8s ease-in-out infinite", pointerEvents: "none" }} />
       <div style={{ position: "absolute", top: 26, left: 48, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={onBack}>
         <LogoMark size={30} />
-        <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: 14 }}>STELLAR&nbsp;VAULT</span>
+        <span style={{ fontWeight: 600, letterSpacing: ".16em", fontSize: T.base }}>STELLAR&nbsp;VAULT</span>
       </div>
-      <div className="vs-rise vfixed" style={{ position: "relative", zIndex: 2, width: 440, border: "1px solid rgba(236,231,221,0.10)", borderRadius: 18, background: "linear-gradient(180deg,#141413,#0f0f10)", padding: 40, textAlign: "center", boxShadow: "0 30px 80px rgba(0,0,0,0.5)" }}>
+      <div className="vs-rise vfixed" style={{ position: "relative", zIndex: 2, width: 440, border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, background: "linear-gradient(180deg,#141413,#0f0f10)", padding: 40, textAlign: "center", boxShadow: "0 30px 80px rgba(0,0,0,0.5)" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.4)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 26px", position: "relative" }}>
           <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px dashed rgba(201,168,106,0.25)", animation: "vsSpin 24s linear infinite" }} />
-          <div style={{ width: 18, height: 18, borderRadius: 4, background: "#C9A86A", boxShadow: "0 0 20px rgba(201,168,106,0.6)" }} />
+          <div style={{ width: 18, height: 18, borderRadius: R.control, background: "#C9A86A", boxShadow: "0 0 20px rgba(201,168,106,0.6)" }} />
         </div>
-        <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 28, marginBottom: 10 }}>Connect your wallet</h2>
-        <p style={{ fontSize: 14, color: "#8A857B", lineHeight: 1.6, marginBottom: 30 }}>Authorize with Freighter to load the vaults you sign on. Your keys never leave your device.</p>
-        <button onClick={onConnect} disabled={connecting} className="h-goldbtn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 10, cursor: connecting ? "wait" : "pointer", opacity: connecting ? 0.8 : 1 }}>
-          <span style={{ width: 20, height: 20, borderRadius: 5, background: "#0A0A0B", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#C9A86A", fontSize: 12, fontWeight: 700 }}>F</span>
+        <h2 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xl, marginBottom: 10 }}>Connect your wallet</h2>
+        <p style={{ fontSize: T.base, color: "#8A857B", lineHeight: 1.6, marginBottom: 30 }}>Authorize with Freighter to load the vaults you sign on. Your keys never leave your device.</p>
+        <button onClick={onConnect} disabled={connecting} className="h-goldbtn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 15, border: "none", borderRadius: R.card, cursor: connecting ? "wait" : "pointer", opacity: connecting ? 0.8 : 1 }}>
+          <span style={{ width: 20, height: 20, borderRadius: R.control, background: "#0A0A0B", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#C9A86A", fontSize: T.sm, fontWeight: 700 }}>F</span>
           {connecting ? "Connecting…" : "Connect Freighter"}
         </button>
-        <div style={{ marginTop: 24, fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>TESTNET · no real funds at risk</div>
+        <div style={{ marginTop: 24, fontFamily: MONO, fontSize: T.xs, color: "#5a564d" }}>TESTNET · no real funds at risk</div>
       </div>
     </div>
   );
@@ -1094,7 +1109,7 @@ function AppShell(p: ShellProps) {
     p.screen === "vault" || p.screen === "propose" || p.screen === "guards" || p.screen === "confidential";
 
   const navBtn = (label: string, active: boolean, onClick?: () => void) => (
-    <button onClick={onClick} className="h-nav" style={{ background: "transparent", border: "none", color: active ? "#ECE7DD" : "#8A857B", fontFamily: SANS, fontSize: 13, padding: "7px 12px", borderRadius: 7, cursor: "pointer" }}>{label}</button>
+    <button onClick={onClick} className="h-nav" style={{ background: "transparent", border: "none", color: active ? "#ECE7DD" : "#8A857B", fontFamily: SANS, fontSize: T.sm, padding: "7px 12px", borderRadius: R.control, cursor: "pointer" }}>{label}</button>
   );
   return (
     <div style={{ position: "relative", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -1102,9 +1117,9 @@ function AppShell(p: ShellProps) {
       <div className="vapp-head" style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", gap: 34, padding: "16px 32px", borderBottom: "1px solid rgba(236,231,221,0.08)", background: "rgba(10,10,11,0.82)", backdropFilter: "blur(14px)" }}>
         <div className="vapp-brand" style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer", minWidth: 0 }} onClick={() => p.go("landing")}>
           <LogoMark size={28} />
-          <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: 13, whiteSpace: "nowrap" }}>STELLAR&nbsp;VAULT</span>
+          <span style={{ fontWeight: 600, letterSpacing: ".14em", fontSize: T.sm, whiteSpace: "nowrap" }}>STELLAR&nbsp;VAULT</span>
         </div>
-        <div className="vapp-crumb" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, minWidth: 0 }}>
+        <div className="vapp-crumb" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: T.sm, minWidth: 0 }}>
           {navBtn("Vaults", p.screen === "dashboard", () => p.go("dashboard"))}
           {/* Guards and the confidential balance belong to ONE vault — its
               limits, its signer set, its balance. They show only while you
@@ -1113,8 +1128,8 @@ function AppShell(p: ShellProps) {
               list, which is exactly where they do not belong. */}
           {inVault && p.vaultAddress && (
             <>
-              <span className="vapp-crumb-name" style={{ color: "#3a3833", fontSize: 15, margin: "0 2px" }}>/</span>
-              <span className="vapp-crumb-name" style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", letterSpacing: ".06em" }}>
+              <span className="vapp-crumb-name" style={{ color: "#3a3833", fontSize: T.base, margin: "0 2px" }}>/</span>
+              <span className="vapp-crumb-name" style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d", letterSpacing: ".06em" }}>
                 {p.config?.name || shortContract(p.vaultAddress)}
               </span>
               {navBtn("Guards", p.screen === "guards", () => p.go("guards"))}
@@ -1123,7 +1138,7 @@ function AppShell(p: ShellProps) {
           )}
         </div>
         <div className="vapp-right" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
-          <div className="vapp-net" style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 7, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
+          <div className="vapp-net" style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: T.xs, color: "#8A857B", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "6px 10px" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7FB069" }} />Testnet</div>
           <WalletMenu wallet={p.wallet} onToast={p.onToast} />
         </div>
       </div>
@@ -1152,7 +1167,7 @@ function AppShell(p: ShellProps) {
           hundred pixels of nothing and read as still loading. The landing
           page closes the same way. */}
       <div className="vapp-foot" style={{ position: "relative", zIndex: 1, borderTop: "1px solid rgba(236,231,221,0.08)", padding: "22px 32px", marginTop: 40 }}>
-        <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", fontSize: 12.5, color: "#5a564d" }}>
+        <div style={{ maxWidth: 1340, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", fontSize: T.sm, color: "#5a564d" }}>
           <span style={{ letterSpacing: ".14em" }}>STELLAR&nbsp;VAULT</span>
           <span style={{ fontFamily: MONO, display: "inline-flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <a className="h-copy" href={contractExplorerUrl(CONFIG.factoryId)} target="_blank" rel="noopener noreferrer" style={{ color: "#5a564d", textDecoration: "none" }}>
@@ -1255,40 +1270,40 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
 
   return (
     <div ref={box} style={{ position: "relative" }}>
-      <button onClick={() => wallet && setOpen((o) => !o)} className="h-wallet" style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(201,168,106,0.08)", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 9, padding: "7px 12px", cursor: wallet ? "pointer" : "default", fontFamily: SANS }}>
+      <button onClick={() => wallet && setOpen((o) => !o)} className="h-wallet" style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(201,168,106,0.08)", border: "1px solid rgba(201,168,106,0.28)", borderRadius: R.control, padding: "7px 12px", cursor: wallet ? "pointer" : "default", fontFamily: SANS }}>
         <span style={{ width: 22, height: 22, borderRadius: "50%", background: GRAD_A }} />
         <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.2 }}>
-          <span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{wallet ? shortAddr(wallet, 6, 4) : "Not connected"}</span>
-          <span style={{ fontSize: 10, color: "#8A857B" }}>{wallet ? "Freighter" : "demo mode"}</span>
+          <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }}>{wallet ? shortAddr(wallet, 6, 4) : "Not connected"}</span>
+          <span style={{ fontSize: T.xs, color: "#8A857B" }}>{wallet ? "Freighter" : "demo mode"}</span>
         </span>
-        {wallet && <span style={{ fontSize: 9, color: "#8A857B", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>}
+        {wallet && <span style={{ fontSize: T.xs, color: "#8A857B", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>}
       </button>
 
       {open && wallet && (
-        <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: 340, background: "#121214", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 12, padding: 16, boxShadow: "0 18px 50px rgba(0,0,0,0.55)", zIndex: 60 }}>
-          <div style={{ fontSize: 10, letterSpacing: ".12em", color: "#8A857B", marginBottom: 7 }}>YOUR ADDRESS</div>
-          <div style={{ fontFamily: MONO, fontSize: 11, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.55, marginBottom: 9 }}>{wallet}</div>
-          <button onClick={copy} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: copied ? "#7FB069" : "#8A857B", fontFamily: SANS, fontSize: 11.5, borderRadius: 7, padding: "5px 11px", cursor: "pointer" }}>
+        <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: 340, background: "#121214", border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.card, padding: 16, boxShadow: "0 18px 50px rgba(0,0,0,0.55)", zIndex: 60 }}>
+          <div style={{ fontSize: T.xs, letterSpacing: ".12em", color: "#8A857B", marginBottom: 7 }}>YOUR ADDRESS</div>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.55, marginBottom: 9 }}>{wallet}</div>
+          <button onClick={copy} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: copied ? "#7FB069" : "#8A857B", fontFamily: SANS, fontSize: T.xs, borderRadius: R.control, padding: "5px 11px", cursor: "pointer" }}>
             {copied ? "✓ Copied" : "Copy"}
           </button>
 
           <div style={{ height: 1, background: "rgba(236,231,221,0.09)", margin: "16px -16px 15px" }} />
 
-          <div style={{ fontSize: 10, letterSpacing: ".12em", color: "#8A857B", marginBottom: 8 }}>CONFIDENTIAL ACCOUNT</div>
+          <div style={{ fontSize: T.xs, letterSpacing: ".12em", color: "#8A857B", marginBottom: 8 }}>CONFIDENTIAL ACCOUNT</div>
 
-          {reg === null && <div style={{ fontSize: 12.5, color: "#8A857B" }}>Checking…</div>}
+          {reg === null && <div style={{ fontSize: T.sm, color: "#8A857B" }}>Checking…</div>}
 
           {reg === true && !bal && (
             <>
-              <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
+              <div style={{ fontSize: T.sm, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
                 <span style={{ color: "#7FB069" }}>✓ Ready</span> — anyone can pay this address confidentially, with the amount hidden on-chain.
               </div>
               {/* The balance is a commitment: the chain stores it, but only this
                   key can read it, so it takes a signature to show a number. */}
-              <button onClick={() => run("Unlock", async () => {})} disabled={!!busy} style={{ width: "100%", background: "transparent", border: "1px solid rgba(201,168,106,0.4)", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, padding: "9px 14px", borderRadius: 8, cursor: busy ? "wait" : "pointer" }}>
+              <button onClick={() => run("Unlock", async () => {})} disabled={!!busy} style={{ width: "100%", background: "transparent", border: "1px solid rgba(201,168,106,0.4)", color: "#C9A86A", fontFamily: SANS, fontSize: T.sm, padding: "9px 14px", borderRadius: R.control, cursor: busy ? "wait" : "pointer" }}>
                 {busy === "Unlock" ? "Reading…" : "Show balance"}
               </button>
-              <div style={{ fontSize: 11, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
+              <div style={{ fontSize: T.xs, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
                 Signature only — no transaction, no fee.
               </div>
             </>
@@ -1296,14 +1311,14 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
 
           {reg === true && bal && (
             <>
-              <div style={{ fontFamily: DISPLAY, fontSize: 27, color: "#ECE7DD", lineHeight: 1.15 }}>
-                {formatXLM(bal.spendable)} <span style={{ fontSize: 13, color: "#8A857B", fontFamily: SANS }}>XLM ready</span>
+              <div style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD", lineHeight: 1.15 }}>
+                {formatXLM(bal.spendable)} <span style={{ fontSize: T.sm, color: "#8A857B", fontFamily: SANS }}>XLM ready</span>
               </div>
 
               {bal.receiving > 0n && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10, padding: "9px 11px", background: "rgba(201,168,106,0.07)", border: "1px solid rgba(201,168,106,0.22)", borderRadius: 8 }}>
-                  <span style={{ fontSize: 12, color: "#ECE7DD" }}>+{formatXLM(bal.receiving)} XLM arriving</span>
-                  <button onClick={() => run("Settle", async (k) => { await confidentialMergeSelf(wallet, await buildMergeArgs(wallet)); }, { title: "Settled", sub: "It moved into your ready balance and can be withdrawn." })} disabled={!!busy} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: 11.5, padding: "6px 12px", borderRadius: 6, cursor: busy ? "wait" : "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10, padding: "9px 11px", background: "rgba(201,168,106,0.07)", border: "1px solid rgba(201,168,106,0.22)", borderRadius: R.control }}>
+                  <span style={{ fontSize: T.sm, color: "#ECE7DD" }}>+{formatXLM(bal.receiving)} XLM arriving</span>
+                  <button onClick={() => run("Settle", async (k) => { await confidentialMergeSelf(wallet, await buildMergeArgs(wallet)); }, { title: "Settled", sub: "It moved into your ready balance and can be withdrawn." })} disabled={!!busy} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: T.xs, padding: "6px 12px", borderRadius: R.control, cursor: busy ? "wait" : "pointer" }}>
                     {busy === "Settle" ? "…" : "Settle"}
                   </button>
                 </div>
@@ -1313,9 +1328,9 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
                   XLM. The amount becomes public on the way — what stays hidden
                   is whatever is left behind. */}
               <div style={{ marginTop: 13 }}>
-                <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Withdraw to your XLM balance</div>
+                <div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Withdraw to your XLM balance</div>
                 <div style={{ display: "flex", gap: 7 }}>
-                  <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" inputMode="decimal" style={{ flex: 1, minWidth: 0, background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: 7, padding: "8px 10px", color: "#ECE7DD", fontFamily: MONO, fontSize: 12.5, outline: "none" }} />
+                  <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" inputMode="decimal" style={{ flex: 1, minWidth: 0, background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: R.control, padding: "8px 10px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm, outline: "none" }} />
                   <button
                     onClick={() => run("Withdraw", async (k) => {
                       const st = toStroopsSafe(amount);
@@ -1324,12 +1339,12 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
                       setAmount("");
                     }, { title: "Withdrawn", sub: "It is ordinary XLM in this wallet now — visible in Freighter." })}
                     disabled={!!busy || !amount.trim()}
-                    style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: 12, padding: "8px 14px", borderRadius: 7, cursor: busy ? "wait" : "pointer", opacity: !amount.trim() ? 0.45 : 1, whiteSpace: "nowrap" }}
+                    style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", fontFamily: SANS, fontWeight: 600, fontSize: T.sm, padding: "8px 14px", borderRadius: R.control, cursor: busy ? "wait" : "pointer", opacity: !amount.trim() ? 0.45 : 1, whiteSpace: "nowrap" }}
                   >
                     {busy === "Withdraw" ? "Proving…" : "Withdraw"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "#8A857B", marginTop: 7, lineHeight: 1.55 }}>
+                <div style={{ fontSize: T.xs, color: "#8A857B", marginTop: 7, lineHeight: 1.55 }}>
                   This amount becomes public; the rest of your hidden balance stays hidden.
                 </div>
               </div>
@@ -1338,16 +1353,16 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
 
           {reg === false && (
             <>
-              <div style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
+              <div style={{ fontSize: T.sm, color: "#ECE7DD", lineHeight: 1.65, marginBottom: 11 }}>
                 Not set up. A confidential payment encrypts its amount to the recipient&apos;s key, so an address without one cannot receive it.
                 <div style={{ color: "#8A857B", marginTop: 7 }}>
                   This is your wallet, separate from any vault — setting up a vault&apos;s hidden balance registers the vault, not you.
                 </div>
               </div>
-              <button onClick={enable} disabled={!!busy} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 13, padding: "10px 14px", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.75 : 1 }}>
+              <button onClick={enable} disabled={!!busy} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.sm, padding: "10px 14px", border: "none", borderRadius: R.control, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.75 : 1 }}>
                 {busy === "Setup" ? "Setting up…" : "Set up — one transaction"}
               </button>
-              <div style={{ fontSize: 11, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
+              <div style={{ fontSize: T.xs, color: "#8A857B", marginTop: 8, lineHeight: 1.55 }}>
                 One signature to derive your key, then one transaction. Nothing is stored — the key regenerates from that signature whenever it&apos;s needed.
               </div>
             </>
@@ -1360,13 +1375,20 @@ function WalletMenu({ wallet, onToast }: { wallet: string | null; onToast: (t: T
 
 /* ============================ DASHBOARD ============================ */
 function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }: { go: (s: Screen) => void; wallet: string | null; balance: bigint | null; proposals: Proposal[]; vaultAddress: string; onOpenVault: (addr: string) => void }) {
-  const pending = proposals.filter((x) => !x.executed).length;
-  const [myVaults, setMyVaults] = useState<{ address: string; name: string; threshold: number; signers: number; balance: bigint }[]>([]);
+  const [myVaults, setMyVaults] = useState<{ address: string; name: string; threshold: number; signers: number; balance: bigint; open: Proposal[] }[]>([]);
   const [loadingVaults, setLoadingVaults] = useState(true);
   const [hidden, setHidden] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => setHidden(loadHidden(wallet)), [wallet]);
+
+  const visible = myVaults.filter((v) => showHidden || !hidden.includes(v.address));
+  // Approvals are remembered locally per (vault, proposal, wallet), so "still
+  // needs me" is answerable without another round of reads.
+  const waiting = visible.reduce(
+    (n, v) => n + v.open.filter((x) => !didApprove(v.address, x.id, wallet)).length,
+    0
+  );
 
   const toggleHidden = (addr: string) => {
     if (!wallet) return;
@@ -1389,8 +1411,18 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
         const items = await Promise.all(
           addrs.map(async (address) => {
             try {
-              const [c, b] = await Promise.all([getVault(address), getVaultBalance(address)]);
-              return { address, name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b };
+              // The one question a multi-sig dashboard exists to answer is
+              // "does anything need me?", and it is not answerable from one
+              // vault. Proposals are read per vault so the ledger below can
+              // show what is waiting, wherever it is waiting.
+              const [c, b, ps, retired] = await Promise.all([
+                getVault(address),
+                getVaultBalance(address),
+                getProposals(address).catch(() => [] as Proposal[]),
+                getRetiredBefore(address).catch(() => 0),
+              ]);
+              const open = ps.filter((x) => !x.executed && x.id >= retired);
+              return { address, name: c.name, threshold: c.threshold, signers: c.signer_count, balance: b, open };
             } catch {
               return null;
             }
@@ -1408,37 +1440,54 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 30 }}>
-        <div>
-          <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".18em", color: "#8A857B", marginBottom: 10 }}>YOUR TREASURIES</div>
-          <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 38, letterSpacing: "-0.01em" }}>Vaults</h1>
+      <div className="vapp-vhead" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 20, marginBottom: 26 }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, letterSpacing: "-0.01em", marginBottom: 8 }}>Vaults</h1>
+          {/* One line instead of three cards. The counts were a card each and
+              the only number that matters — what is waiting on this wallet —
+              was not among them: the third card read "Pending (current vault)",
+              scoped to a vault you are not looking at. */}
+          <div style={{ fontFamily: MONO, fontSize: T.sm, color: "#8A857B" }}>
+            {loadingVaults ? "reading the chain…" : (
+              <>
+                {myVaults.length} vault{myVaults.length === 1 ? "" : "s"}
+                <span style={{ color: "#3a3833" }}> · </span>
+                {formatXLM(myVaults.reduce((a, v) => a + v.balance, 0n))} XLM
+                <span style={{ color: "#3a3833" }}> · </span>
+                {waiting > 0
+                  ? <span style={{ color: "#C9A86A" }}>{waiting} awaiting your approval</span>
+                  : <span>nothing awaiting you</span>}
+              </>
+            )}
+          </div>
         </div>
-        <button onClick={() => go("create")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: "12px 18px", border: "none", borderRadius: 9, cursor: "pointer" }}><span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Create New Vault</button>
-      </div>
-      <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
-        <Stat label="Total balance" valueNode={<>{loadingVaults ? "…" : formatXLM(myVaults.reduce((s, v) => s + v.balance, 0n))} <span style={{ fontSize: 15, color: "#8A857B", fontFamily: MONO }}>XLM</span></>} />
-        <Stat label="Your vaults" valueNode={<>{loadingVaults ? "…" : myVaults.length}</>} />
-        <Stat label="Pending (current vault)" valueNode={<span style={{ color: "#C9A86A" }}>{pending}</span>} gold />
+        <button onClick={() => go("create")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 9, background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: "12px 18px", border: "none", borderRadius: R.control, cursor: "pointer", whiteSpace: "nowrap" }}><span style={{ fontSize: T.base, lineHeight: 1 }}>+</span> Create New Vault</button>
       </div>
 
-      {wallet && (
-        <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: ".16em", color: "#8A857B", marginBottom: 14 }}>YOUR VAULTS</div>
-      )}
-      <div className="vgrid3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 30 }}>
-        {loadingVaults && wallet && [0, 1, 2].map((i) => <VaultCardSkeleton key={i} />)}
-        {!loadingVaults && myVaults.filter((v) => showHidden || !hidden.includes(v.address)).map((v) => (
-          <VaultCard key={v.address} onClick={() => onOpenVault(v.address)} name={v.name || "Vault"} id={shortContract(v.address)} threshold={`${v.threshold} / ${v.signers}`} balance={formatXLM(v.balance)} avatars={Array.from({ length: v.signers }, (_, i) => letterFor(i))} gold={v.address === vaultAddress} live hidden={hidden.includes(v.address)} onToggleHidden={() => toggleHidden(v.address)} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+        {loadingVaults && wallet && [0, 1].map((i) => <VaultRowSkeleton key={i} />)}
+        {!loadingVaults && visible.map((v) => (
+          <VaultRow
+            key={v.address}
+            v={v}
+            wallet={wallet}
+            current={v.address === vaultAddress}
+            hidden={hidden.includes(v.address)}
+            onOpen={() => onOpenVault(v.address)}
+            onToggleHidden={() => toggleHidden(v.address)}
+          />
         ))}
-        {!loadingVaults && wallet && myVaults.length > 0 && <CreateVaultTile onClick={() => go("create")} />}
-        {!loadingVaults && !myVaults.length && wallet && (
-          <div style={{ gridColumn: "1 / -1", border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 15, padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>
-            No vaults yet. Click <span style={{ color: "#C9A86A" }}>“Create New Vault”</span> — each one is its own contract, recorded on-chain.
-          </div>
+        {!loadingVaults && wallet && (
+          <button onClick={() => go("create")} className="h-addsigner" style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", cursor: "pointer", border: "1px dashed rgba(236,231,221,0.14)", borderRadius: R.card, background: "transparent", padding: "18px 22px", fontFamily: SANS }}>
+            <span style={{ fontSize: T.lg, lineHeight: 1, color: "#C9A86A" }}>+</span>
+            <span style={{ fontSize: T.base, fontWeight: 600, color: "#ECE7DD" }}>{myVaults.length ? "Create another vault" : "Create your first vault"}</span>
+            <span style={{ fontSize: T.sm, color: "#8A857B" }}>its own contract, its own signers and balance</span>
+          </button>
         )}
       </div>
 
       {hidden.length > 0 && (
-        <div style={{ fontSize: 12.5, color: "#5a564d", marginTop: -14, marginBottom: 24 }}>
+        <div style={{ fontSize: T.sm, color: "#5a564d", marginTop: -14, marginBottom: 24 }}>
           {hidden.length} vault{hidden.length === 1 ? "" : "s"} hidden — still on-chain, still holding whatever they hold.{" "}
           <span onClick={() => setShowHidden(!showHidden)} style={{ color: "#C9A86A", cursor: "pointer" }}>
             {showHidden ? "hide them again" : "show them"}
@@ -1448,92 +1497,101 @@ function Dashboard({ go, wallet, balance, proposals, vaultAddress, onOpenVault }
     </div>
   );
 }
-function Stat({ label, valueNode, gold }: { label: string; valueNode: React.ReactNode; gold?: boolean }) {
-  return (
-    <div style={{ border: gold ? "1px solid rgba(201,168,106,0.24)" : "1px solid rgba(236,231,221,0.08)", borderRadius: 13, background: gold ? "linear-gradient(180deg,#16150f,#121210)" : "#121211", padding: "20px 22px" }}>
-      <div style={{ fontSize: 12, color: "#8A857B", marginBottom: 8 }}>{label}</div>
-      <div style={{ fontFamily: DISPLAY, fontSize: 30, color: "#ECE7DD" }}>{valueNode}</div>
-    </div>
-  );
-}
+
 /**
- * The empty slot beside the vaults, turned into the action that fills it.
+ * One vault, as a row in a ledger rather than a card in a grid.
  *
- * With one vault, a three-column grid left two thirds of the row blank and the
- * page read as unfinished. This is not filler: creating a vault is the primary
- * action of the screen, and this puts it where the eye already is, next to
- * what you have. It sits after the last vault, so the row is never ragged.
+ * A three-column grid guaranteed emptiness at one or two vaults, and stacked
+ * twice over it made the first screen after connecting read as unfinished. A
+ * row is full at any count. It also has somewhere to put what a card had no
+ * room for: the proposals still open underneath, which is the thing a
+ * co-signer actually came to find out.
  */
-function CreateVaultTile({ onClick }: { onClick: () => void }) {
+function VaultRow({ v, wallet, current, hidden, onOpen, onToggleHidden }: {
+  v: { address: string; name: string; threshold: number; signers: number; balance: bigint; open: Proposal[] };
+  wallet: string | null; current: boolean; hidden: boolean; onOpen: () => void; onToggleHidden: () => void;
+}) {
+  const mine = v.open.filter((x) => !didApprove(v.address, x.id, wallet));
   return (
-    <button onClick={onClick} className="h-addsigner" style={{
-      display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 8,
-      minHeight: 168, width: "100%", textAlign: "left", cursor: "pointer",
-      border: "1px dashed rgba(236,231,221,0.14)", borderRadius: 15, background: "transparent",
-      padding: 24, fontFamily: SANS,
-    }}>
-      <span style={{ fontSize: 22, lineHeight: 1, color: "#C9A86A" }}>+</span>
-      <span style={{ fontSize: 15, fontWeight: 600, color: "#ECE7DD" }}>Create a vault</span>
-      <span style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>Its own contract, its own signers and balance.</span>
-    </button>
-  );
-}
-
-function VaultCardSkeleton() {
-  const bar = (w: string | number, h = 12) => <div style={{ width: w, height: h, borderRadius: 5, background: "rgba(236,231,221,0.06)", animation: "vsShimmer 1.4s ease-in-out infinite" }} />;
-  return (
-    <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: 15, background: "#121211", padding: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{bar(120, 15)}{bar(70)}</div>
-        {bar(44, 18)}
+    <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", overflow: "hidden", opacity: hidden ? 0.5 : 1 }}>
+      {/* current vault marked by a rule, not by another gold border — gold is
+          the action colour and it was doing six jobs a screen */}
+      {current && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: "rgba(236,231,221,0.3)" }} />}
+      <div onClick={onOpen} className="h-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, padding: "18px 22px", cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+            <span style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD" }}>{v.name || "Vault"}</span>
+            <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>{v.threshold} of {v.signers}</span>
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d" }}>{shortContract(v.address)}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD" }}>{formatXLM(v.balance)} <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>XLM</span></div>
+          </div>
+          <span
+            onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
+            title={hidden ? "Show on the dashboard again" : "Hide from the dashboard — the vault and its funds are untouched"}
+            style={{ fontFamily: MONO, fontSize: T.xs, color: "#46433c", cursor: "pointer" }}
+          >{hidden ? "unhide" : "hide"}</span>
+        </div>
       </div>
-      <div style={{ marginBottom: 18 }}>{bar(110, 22)}</div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>{bar(70, 22)}{bar(60)}</div>
-    </div>
-  );
-}
-
-function VaultCard({ name, id, threshold, balance, avatars, pending, gold, live, onClick, hidden, onToggleHidden }: { name: string; id: string; threshold: string; balance: string; avatars: string[]; pending?: string; gold?: boolean; live?: boolean; onClick?: () => void; hidden?: boolean; onToggleHidden?: () => void }) {
-  return (
-    <div onClick={onClick} className={gold ? "h-cardgold" : "h-card"} style={{ position: "relative", border: gold ? "1px solid rgba(201,168,106,0.24)" : "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: gold ? "linear-gradient(180deg,#15140f,#111110)" : "#121211", padding: 24, cursor: "pointer", overflow: "hidden" }}>
-      {gold && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />}
-      {onToggleHidden && (
-        <span
-          onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
-          title={hidden ? "Show on the dashboard again" : "Hide from the dashboard — the vault and its funds are untouched"}
-          style={{ position: "absolute", top: 10, right: 12, fontFamily: MONO, fontSize: 10.5, color: "#46433c", cursor: "pointer", letterSpacing: ".08em" }}
-        >{hidden ? "unhide" : "hide"}</span>
+      {v.open.length > 0 && (
+        <div style={{ borderTop: "1px solid rgba(236,231,221,0.06)", padding: "12px 22px 14px", background: "rgba(0,0,0,0.18)" }}>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".1em", color: "#5a564d", marginBottom: 9 }}>
+            {v.open.length} OPEN{mine.length > 0 && <span style={{ color: "#C9A86A" }}> · {mine.length} NEED YOU</span>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {v.open.slice(0, 4).map((x) => {
+              const waiting = !didApprove(v.address, x.id, wallet);
+              return (
+                <div key={x.id} onClick={onOpen} className="h-history" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, cursor: "pointer", fontSize: T.sm }}>
+                  <span style={{ fontFamily: MONO, color: waiting ? "#ECE7DD" : "#5a564d", minWidth: 0, overflowWrap: "anywhere" }}>
+                    <span style={{ color: "#5a564d" }}>#{x.id}</span>{" "}
+                    {/* a batch and a rule change both record the vault itself
+                        as the target, so printing it would name the payer as
+                        the payee */}
+                    {x.private_mode
+                      ? "private"
+                      : x.target === v.address
+                        ? (x.amount === 0n ? "rule change" : "batch")
+                        : shortAddr(x.target, 4, 4)}
+                  </span>
+                  <span style={{ fontFamily: MONO, color: waiting ? "#C9A86A" : "#5a564d", whiteSpace: "nowrap" }}>
+                    {waiting ? "needs you" : "you approved"} · {x.approval_count}/{v.threshold}
+                  </span>
+                </div>
+              );
+            })}
+            {v.open.length > 4 && (
+              <div style={{ fontSize: T.sm, color: "#5a564d" }}>and {v.open.length - 4} more</div>
+            )}
+          </div>
+        </div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>{name}{live && <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "1px 5px" }}>LIVE</span>}</div>
-          <div style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>{id}</div>
-        </div>
-        <span style={{ fontFamily: MONO, fontSize: 11, color: gold ? "#C9A86A" : "#8A857B", border: gold ? "1px solid rgba(201,168,106,0.32)" : "1px solid rgba(236,231,221,0.14)", borderRadius: 6, padding: "3px 7px" }}>{threshold}</span>
-      </div>
-      <div style={{ fontFamily: DISPLAY, fontSize: 26, marginBottom: 18 }}>{balance} <span style={{ fontSize: 13, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex" }}>
-          {avatars.map((a, i) => {
-            const muted = a.startsWith("+");
-            const cardBg = gold ? "#111110" : "#121211";
-            return <Avatar key={i} letter={a} grad={GRADS[i % 3]} muted={muted} border={`2px solid ${cardBg}`} ml={i === 0 ? 0 : -8} />;
-          })}
-        </div>
-        {pending ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "#C9A86A" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#C9A86A", animation: "vsPulseDot 2s ease-in-out infinite" }} />{pending}</span>
-        ) : (<span style={{ fontSize: 12, color: "#5a564d" }}>No pending</span>)}
-      </div>
     </div>
   );
 }
+
+function VaultRowSkeleton() {
+  const bar = (w: number | string, h = 12) => <div style={{ width: w, height: h, borderRadius: R.control, background: "rgba(236,231,221,0.06)", animation: "vsShimmer 1.4s ease-in-out infinite" }} />;
+  return (
+    <div style={{ border: "1px solid rgba(236,231,221,0.06)", borderRadius: R.card, background: "#121211", padding: "22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>{bar(160, 18)}{bar(90)}</div>
+      {bar(110, 20)}
+    </div>
+  );
+}
+
+
+
 
 /* ============================ CREATE VAULT (live) ============================ */
 function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; wallet: string | null; busy: string | null; onCreate: (name: string, signers: string[], threshold: number) => void }) {
   const [name, setName] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(1);
-  const inputStyle: React.CSSProperties = { flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 };
+  const inputStyle: React.CSSProperties = { flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm };
 
   const allSigners = [wallet ?? "", ...extra].filter((s) => s.trim().length > 0);
   const validAddr = (a: string) => /^G[A-Z2-7]{55}$/.test(a.trim());
@@ -1545,54 +1603,54 @@ function CreateVault({ go, wallet, busy, onCreate }: { go: (s: Screen) => void; 
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto" }}>
-      <button onClick={() => go("dashboard")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 22, padding: 0 }}>← Back to vaults</button>
-      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Create a vault</h1>
-      <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 34 }}>Define who holds the keys and how many must agree before funds move.</p>
+      <button onClick={() => go("dashboard")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", marginBottom: 22, padding: 0 }}>← Back to vaults</button>
+      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, marginBottom: 8 }}>Create a vault</h1>
+      <p style={{ fontSize: T.base, color: "#8A857B", marginBottom: 34 }}>Define who holds the keys and how many must agree before funds move.</p>
 
-      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 28, marginBottom: 18 }}>
-        <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Vault name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Orbital Treasury" maxLength={40} style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "12px 14px", color: "#ECE7DD", fontFamily: SANS, fontSize: 14 }} />
+      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 28, marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Vault name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Orbital Treasury" maxLength={40} style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "12px 14px", color: "#ECE7DD", fontFamily: SANS, fontSize: T.base }} />
       </div>
 
-      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 28, marginBottom: 18 }}>
-        <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 14 }}>Signers</label>
+      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 28, marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 14 }}>Signers</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Avatar letter="A" grad={GRAD_A} size={28} />
             <input readOnly value={wallet ?? "Connect wallet first"} style={{ ...inputStyle, color: wallet ? "#ECE7DD" : "#5a564d" }} />
-            <span style={{ fontSize: 11, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: 5, padding: "3px 7px", whiteSpace: "nowrap" }}>you · owner</span>
+            <span style={{ fontSize: T.xs, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: R.control, padding: "3px 7px", whiteSpace: "nowrap" }}>you · owner</span>
           </div>
           {extra.map((val, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Avatar letter={letterFor(i + 1)} grad={GRADS[(i + 1) % 3]} size={28} />
               <input value={val} onChange={(e) => setExtraAt(i, e.target.value)} placeholder="G…" style={{ ...inputStyle, borderColor: val && !validAddr(val) ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)" }} />
-              <button onClick={() => removeExtra(i)} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 18, padding: "0 6px" }}>×</button>
+              <button onClick={() => removeExtra(i)} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: T.lg, padding: "0 6px" }}>×</button>
             </div>
           ))}
         </div>
-        <button onClick={() => setExtra((xs) => [...xs, ""])} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer" }}>+ Add signer</button>
+        <button onClick={() => setExtra((xs) => [...xs, ""])} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, padding: 10, width: "100%", borderRadius: R.control, cursor: "pointer" }}>+ Add signer</button>
       </div>
 
-      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 28, marginBottom: 18 }}>
-        <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Approval threshold</label>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 18 }}>How many signers must approve each transaction.</p>
+      <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 28, marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Approval threshold</label>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 18 }}>How many signers must approve each transaction.</p>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ display: "flex", gap: 8 }}>
             {Array.from({ length: Math.max(signerCount, 1) }).map((_, i) => (
-              <button key={i} onClick={() => setThreshold(i + 1)} className={threshold === i + 1 ? undefined : "h-thresh"} style={{ width: 42, height: 42, borderRadius: 9, border: threshold === i + 1 ? "1px solid #C9A86A" : "1px solid rgba(236,231,221,0.12)", background: threshold === i + 1 ? "rgba(201,168,106,0.12)" : "#0d0d0e", color: threshold === i + 1 ? "#C9A86A" : "#8A857B", fontSize: 15, fontWeight: threshold === i + 1 ? 700 : 600, cursor: "pointer" }}>{i + 1}</button>
+              <button key={i} onClick={() => setThreshold(i + 1)} className={threshold === i + 1 ? undefined : "h-thresh"} style={{ width: 42, height: 42, borderRadius: R.control, border: threshold === i + 1 ? "1px solid #C9A86A" : "1px solid rgba(236,231,221,0.12)", background: threshold === i + 1 ? "rgba(201,168,106,0.12)" : "#0d0d0e", color: threshold === i + 1 ? "#C9A86A" : "#8A857B", fontSize: T.base, fontWeight: threshold === i + 1 ? 700 : 600, cursor: "pointer" }}>{i + 1}</button>
             ))}
           </div>
           <span style={{ color: "#5a564d" }}>of {signerCount} signer{signerCount === 1 ? "" : "s"}</span>
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(201,168,106,0.24)", borderRadius: 13, background: "linear-gradient(180deg,#16150f,#121210)", padding: "18px 22px", marginBottom: 22 }}>
-        <span style={{ fontSize: 14, color: "#8A857B" }}>Live summary</span>
-        <span style={{ fontSize: 15, color: "#ECE7DD" }}><span style={{ color: "#C9A86A", fontWeight: 600 }}>{threshold} of {signerCount}</span> signer{signerCount === 1 ? "" : "s"} must approve to move funds.</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(201,168,106,0.24)", borderRadius: R.card, background: "linear-gradient(180deg,#16150f,#121210)", padding: "18px 22px", marginBottom: 22 }}>
+        <span style={{ fontSize: T.base, color: "#8A857B" }}>Live summary</span>
+        <span style={{ fontSize: T.base, color: "#ECE7DD" }}><span style={{ color: "#C9A86A", fontWeight: 600 }}>{threshold} of {signerCount}</span> signer{signerCount === 1 ? "" : "s"} must approve to move funds.</span>
       </div>
 
-      <button onClick={() => canCreate && onCreate(name.trim(), allSigners, threshold)} disabled={!canCreate} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: canCreate ? "pointer" : "not-allowed", opacity: canCreate ? 1 : 0.5 }}>{busy === "create" ? "Creating · check Freighter…" : "Create vault · sign with wallet"}</button>
-      <p style={{ fontSize: 11, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO }}>{wallet ? "Threshold 1 + just you = full solo demo (propose → approve → execute yourself)" : "Connect a Freighter wallet to create on-chain"}</p>
+      <button onClick={() => canCreate && onCreate(name.trim(), allSigners, threshold)} disabled={!canCreate} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 15, border: "none", borderRadius: R.card, cursor: canCreate ? "pointer" : "not-allowed", opacity: canCreate ? 1 : 0.5 }}>{busy === "create" ? "Creating · check Freighter…" : "Create vault · sign with wallet"}</button>
+      <p style={{ fontSize: T.xs, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO }}>{wallet ? "Threshold 1 + just you = full solo demo (propose → approve → execute yourself)" : "Connect a Freighter wallet to create on-chain"}</p>
     </div>
   );
 }
@@ -1619,26 +1677,26 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
 
   return (
     <div>
-      <button onClick={() => go("dashboard")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← All vaults</button>
+      <button onClick={() => go("dashboard")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", marginBottom: 20, padding: 0 }}>← All vaults</button>
 
-      <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.22)", borderRadius: 17, background: "linear-gradient(180deg,#15140f,#111110)", padding: "28px 30px", marginBottom: 24, overflow: "hidden" }}>
+      <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.22)", borderRadius: R.card, background: "linear-gradient(180deg,#15140f,#111110)", padding: "28px 30px", marginBottom: 24, overflow: "hidden" }}>
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />
         <div className="vapp-vhead" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-              <h1 className="vapp-wrap" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32 }}>{config?.name || "Vault"}</h1>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.32)", borderRadius: 6, padding: "4px 9px" }}>{threshold} / {config?.signer_count ?? signers.length} threshold</span>
-              <span style={{ fontFamily: MONO, fontSize: 9, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 4, padding: "2px 6px" }}>LIVE · TESTNET</span>
+              <h1 className="vapp-wrap" style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl }}>{config?.name || "Vault"}</h1>
+              <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.32)", borderRadius: R.control, padding: "4px 9px" }}>{threshold} / {config?.signer_count ?? signers.length} threshold</span>
+              <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: R.control, padding: "2px 6px" }}>LIVE · TESTNET</span>
             </div>
-            <div className="vapp-wrap" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontFamily: MONO, fontSize: 12, color: "#8A857B" }}>
+            <div className="vapp-wrap" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontFamily: MONO, fontSize: T.sm, color: "#8A857B" }}>
               {shortAddr(vaultAddress, 8, 9)}
               <span className="h-copy" style={{ cursor: "pointer", color: "#C9A86A" }} onClick={() => navigator.clipboard?.writeText(vaultAddress)}>⧉ copy</span>
               <a className="h-copy" href={contractExplorerUrl(vaultAddress)} target="_blank" rel="noreferrer" style={{ cursor: "pointer", color: "#C9A86A", textDecoration: "none" }}>↗ explorer</a>
             </div>
           </div>
           <div className="vapp-vhead-bal" style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 12, color: "#8A857B", marginBottom: 4 }}>Vault balance</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 38, lineHeight: 1 }}>{balance != null ? formatXLM(balance) : (loading ? "…" : "—")} <span style={{ fontSize: 16, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div>
+            <div style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 4 }}>Vault balance</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: T.xxl, lineHeight: 1 }}>{balance != null ? formatXLM(balance) : (loading ? "…" : "—")} <span style={{ fontSize: T.base, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginTop: 24, paddingTop: 22, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
@@ -1648,12 +1706,12 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
                 <Avatar key={i} letter={letterFor(i)} grad={GRADS[i % 3]} size={30} border="2px solid #121110" ml={i === 0 ? 0 : -9} />
               ))}
             </div>
-            <span style={{ fontSize: 13, color: "#8A857B" }}>{config?.signer_count ?? signers.length} signers</span>
+            <span style={{ fontSize: T.sm, color: "#8A857B" }}>{config?.signer_count ?? signers.length} signers</span>
           </div>
           <div className="vapp-actions" style={{ display: "flex", gap: 10 }}>
-            <button onClick={onRefresh} disabled={loading} className="h-deposit h-icon" title="Refresh from chain" aria-label="Refresh from chain" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#8A857B", border: "1px solid rgba(236,231,221,0.12)", borderRadius: 9, padding: "11px 14px", fontFamily: SANS, fontSize: 14, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>↻</button>
-            <button onClick={onDeposit} disabled={busy === "deposit"} className="h-deposit" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.16)", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 500, cursor: "pointer", opacity: busy === "deposit" ? 0.6 : 1 }}>{busy === "deposit" ? "Depositing…" : "↓ Deposit 100"}</button>
-            <button onClick={() => go("propose")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "11px 18px", fontFamily: SANS, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>+ New Transaction</button>
+            <button onClick={onRefresh} disabled={loading} className="h-deposit h-icon" title="Refresh from chain" aria-label="Refresh from chain" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#8A857B", border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.control, padding: "11px 14px", fontFamily: SANS, fontSize: T.base, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>↻</button>
+            <button onClick={onDeposit} disabled={busy === "deposit"} className="h-deposit" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.16)", borderRadius: R.control, padding: "11px 18px", fontFamily: SANS, fontSize: T.base, fontWeight: 500, cursor: "pointer", opacity: busy === "deposit" ? 0.6 : 1 }}>{busy === "deposit" ? "Depositing…" : "↓ Deposit 100"}</button>
+            <button onClick={() => go("propose")} className="h-goldbtn" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "11px 18px", fontFamily: SANS, fontSize: T.base, fontWeight: 600, cursor: "pointer" }}>+ New Transaction</button>
           </div>
         </div>
       </div>
@@ -1662,17 +1720,17 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
           anyone proposes or approves. A vault whose rules can be bypassed has
           to say so where the risk is taken. */}
       {behind && (
-        <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 12, background: "#100d0d", padding: 16, marginBottom: 20 }}>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>
+        <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: R.card, background: "#100d0d", padding: 16, marginBottom: 20 }}>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>
             RUNNING OLDER CODE{version !== null ? ` · v${version}` : ""}
           </div>
-          <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 10 }}>
+          <div style={{ fontSize: T.sm, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 10 }}>
             A vault keeps the code it was deployed with. On this one:
           </div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#8A857B", lineHeight: 1.7 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: T.sm, color: "#8A857B", lineHeight: 1.7 }}>
             {gapsFor(version ?? 0).map((r) => <li key={r}>{r}</li>)}
           </ul>
-          <button onClick={() => go("guards")} style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(201,168,106,0.42)", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
+          <button onClick={() => go("guards")} style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(201,168,106,0.42)", color: "#C9A86A", fontFamily: SANS, fontSize: T.sm, borderRadius: R.control, padding: "8px 14px", cursor: "pointer" }}>
             Upgrade it in Guards →
           </button>
         </div>
@@ -1682,13 +1740,13 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <span style={{ fontWeight: 600, fontSize: 15 }}>Transactions</span>
-              <div style={{ display: "flex", gap: 4, fontSize: 12 }}>
-                <span onClick={() => setTab("pending")} style={{ color: tab === "pending" ? "#0A0A0B" : "#8A857B", background: tab === "pending" ? "#C9A86A" : "transparent", borderRadius: 6, padding: "4px 10px", fontWeight: 600, cursor: "pointer" }}>Pending {pending.length}</span>
+              <span style={{ fontWeight: 600, fontSize: T.base }}>Transactions</span>
+              <div style={{ display: "flex", gap: 4, fontSize: T.sm }}>
+                <span onClick={() => setTab("pending")} style={{ color: tab === "pending" ? "#0A0A0B" : "#8A857B", background: tab === "pending" ? "#C9A86A" : "transparent", borderRadius: R.control, padding: "4px 10px", fontWeight: 600, cursor: "pointer" }}>Pending {pending.length}</span>
                 <span onClick={() => setTab("history")} className="h-history" style={{ color: tab === "history" ? "#ECE7DD" : "#8A857B", padding: "4px 10px", cursor: "pointer" }}>History {history.length}</span>
               </div>
             </div>
-            <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>live · {shortContract(vaultAddress)}</span>
+            <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d" }}>live · {shortContract(vaultAddress)}</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1736,10 +1794,10 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
             onAdd={onAddSigner}
             onRemove={onRemoveSigner}
           />
-          <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
+          <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 22 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>Guards</span>
-              <button onClick={() => go("guards")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12, cursor: "pointer", padding: 0 }}>Edit →</button>
+              <span style={{ fontWeight: 600, fontSize: T.base }}>Guards</span>
+              <button onClick={() => go("guards")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", padding: 0 }}>Edit →</button>
             </div>
             <PolicyRow label="Threshold" value={`${threshold} of ${config?.signer_count ?? signers.length}`} />
             <PolicyRow
@@ -1778,10 +1836,10 @@ function VaultDetail({ onAddSigner, onRemoveSigner, pendingCount, version, behin
 }
 
 function Skeleton() {
-  return <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 14, background: "#121211", padding: 22, color: "#5a564d", fontFamily: MONO, fontSize: 12 }}>Loading on-chain transactions…</div>;
+  return <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 22, color: "#5a564d", fontFamily: MONO, fontSize: T.sm }}>Loading on-chain transactions…</div>;
 }
 function Empty({ label }: { label: string }) {
-  return <div style={{ border: "1px dashed rgba(236,231,221,0.12)", borderRadius: 14, background: "transparent", padding: 28, textAlign: "center", color: "#8A857B", fontSize: 13 }}>{label}</div>;
+  return <div style={{ border: "1px dashed rgba(236,231,221,0.12)", borderRadius: R.card, background: "transparent", padding: 28, textAlign: "center", color: "#8A857B", fontSize: T.sm }}>{label}</div>;
 }
 /**
  * Who signs, and how that changes.
@@ -1810,10 +1868,10 @@ function SignersCard({ signers, ownerAddr, wallet, threshold, busy, pendingCount
   const canRemove = signers.length > threshold;
 
   return (
-    <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 22 }}>
+    <div style={{ border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 22 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Signers</span>
-        <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d" }}>{threshold} of {signers.length} to pass</span>
+        <span style={{ fontWeight: 600, fontSize: T.base }}>Signers</span>
+        <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d" }}>{threshold} of {signers.length} to pass</span>
       </div>
 
       {(signers.length ? signers : ["", "", ""]).map((sg, i) => (
@@ -1830,7 +1888,7 @@ function SignersCard({ signers, ownerAddr, wallet, threshold, busy, pendingCount
       ))}
 
       {!canRemove && signers.length > 0 && (
-        <div style={{ fontSize: 11, color: "#5a564d", marginTop: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: T.xs, color: "#5a564d", marginTop: 8, lineHeight: 1.5 }}>
           Nobody can be removed at {threshold} of {signers.length} — lower the threshold first.
         </div>
       )}
@@ -1843,28 +1901,28 @@ function SignersCard({ signers, ownerAddr, wallet, threshold, busy, pendingCount
               onChange={(e) => setDraft(e.target.value)}
               placeholder="G… address"
               autoFocus
-              style={{ width: "100%", background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: 8, padding: "9px 11px", color: "#ECE7DD", fontFamily: MONO, fontSize: 11.5, outline: "none", marginBottom: 8 }}
+              style={{ width: "100%", background: "rgba(236,231,221,0.05)", border: "1px solid rgba(236,231,221,0.13)", borderRadius: R.control, padding: "9px 11px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.xs, outline: "none", marginBottom: 8 }}
             />
-            {!!draft.trim() && !valid && <div style={{ fontSize: 11, color: "#C45D4A", marginBottom: 8 }}>That is not a Stellar account address.</div>}
-            {already && <div style={{ fontSize: 11, color: "#C45D4A", marginBottom: 8 }}>Already a signer here.</div>}
+            {!!draft.trim() && !valid && <div style={{ fontSize: T.xs, color: "#C45D4A", marginBottom: 8 }}>That is not a Stellar account address.</div>}
+            {already && <div style={{ fontSize: T.xs, color: "#C45D4A", marginBottom: 8 }}>Already a signer here.</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={() => { onAdd(draft.trim()); setDraft(""); setAdding(false); }}
                 disabled={!valid || already || !!busy}
-                style={{ flex: 1, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "8px 12px", fontFamily: SANS, fontWeight: 600, fontSize: 12.5, cursor: valid && !already ? "pointer" : "not-allowed", opacity: valid && !already ? 1 : 0.45 }}
+                style={{ flex: 1, background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "8px 12px", fontFamily: SANS, fontWeight: 600, fontSize: T.sm, cursor: valid && !already ? "pointer" : "not-allowed", opacity: valid && !already ? 1 : 0.45 }}
               >
                 Propose
               </button>
-              <button onClick={() => { setAdding(false); setDraft(""); }} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: 8, padding: "8px 12px", fontFamily: SANS, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => { setAdding(false); setDraft(""); }} style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: R.control, padding: "8px 12px", fontFamily: SANS, fontSize: T.sm, cursor: "pointer" }}>Cancel</button>
             </div>
           </div>
         ) : (
-          <button onClick={() => setAdding(true)} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 9, width: "100%", borderRadius: 9, cursor: "pointer", marginTop: 10 }}>+ Add signer</button>
+          <button onClick={() => setAdding(true)} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, padding: 9, width: "100%", borderRadius: R.control, cursor: "pointer", marginTop: 10 }}>+ Add signer</button>
         )
       )}
 
       {canPropose && (
-        <div style={{ fontSize: 11, color: "#5a564d", marginTop: 10, lineHeight: 1.55 }}>
+        <div style={{ fontSize: T.xs, color: "#5a564d", marginTop: 10, lineHeight: 1.55 }}>
           Adding or removing needs {threshold} approvals like any payment
           {pendingCount > 0 && (
             <>, and <b style={{ color: "#C9A86A" }}>retires the {pendingCount} open proposal{pendingCount === 1 ? "" : "s"}</b> — their approvals came from a different group, so they have to be proposed again</>
@@ -1880,14 +1938,14 @@ function SignerRow({ letter, grad, addr, owner, you, onRemove, busy }: { letter:
     <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: "1px solid rgba(236,231,221,0.05)" }}>
       <Avatar letter={letter} grad={grad} size={28} />
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, color: "#ECE7DD", display: "flex", alignItems: "center", gap: 7 }}>Signer {letter}
+        <div style={{ fontSize: T.sm, color: "#ECE7DD", display: "flex", alignItems: "center", gap: 7 }}>Signer {letter}
           {/* "creator", not "owner": since v5 the role gates nothing in the
               vault — it is the key the factory files this vault under. Calling
               it owner implied an authority that no longer exists. */}
-          {owner && <span style={{ fontSize: 10, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: 5, padding: "1px 6px" }}>creator</span>}
-          {you && <span style={{ fontSize: 10, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: 5, padding: "1px 6px" }}>you</span>}
+          {owner && <span style={{ fontSize: T.xs, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.3)", borderRadius: R.control, padding: "1px 6px" }}>creator</span>}
+          {you && <span style={{ fontSize: T.xs, color: "#7FB069", border: "1px solid rgba(127,176,105,0.4)", borderRadius: R.control, padding: "1px 6px" }}>you</span>}
         </div>
-        <div style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>{addr}</div>
+        <div style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>{addr}</div>
       </div>
       {onRemove && (
         <button
@@ -1895,7 +1953,7 @@ function SignerRow({ letter, grad, addr, owner, you, onRemove, busy }: { letter:
           disabled={busy}
           title="Propose removing this signer"
           className="h-navtext"
-          style={{ background: "transparent", border: "none", color: "#5a564d", fontFamily: SANS, fontSize: 16, lineHeight: 1, cursor: busy ? "wait" : "pointer", padding: "2px 4px" }}
+          style={{ background: "transparent", border: "none", color: "#5a564d", fontFamily: SANS, fontSize: T.base, lineHeight: 1, cursor: busy ? "wait" : "pointer", padding: "2px 4px" }}
         >
           {busy ? "…" : "×"}
         </button>
@@ -1905,7 +1963,7 @@ function SignerRow({ letter, grad, addr, owner, you, onRemove, busy }: { letter:
 }
 function PolicyRow({ label, value, valueNode }: { label: string; value?: string; valueNode?: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: T.sm, padding: "8px 0" }}>
       <span style={{ color: "#8A857B" }}>{label}</span>
       {valueNode ?? <span style={{ color: "#ECE7DD" }}>{value}</span>}
     </div>
@@ -1925,12 +1983,12 @@ function CapMeter({ spent, cap }: { spent: bigint; cap: bigint }) {
   const hot = pct >= 80;
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 10.5, color: "#8A857B", marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>
         <span>THIS WINDOW</span>
         <span style={{ color: hot ? "#C45D4A" : "#8A857B" }}>{formatXLM(spent)} / {formatXLM(cap)}</span>
       </div>
-      <div style={{ height: 5, borderRadius: 3, background: "rgba(236,231,221,0.07)", overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: hot ? "#C45D4A" : "#C9A86A", transition: "width .4s ease" }} />
+      <div style={{ height: 5, borderRadius: R.control, background: "rgba(236,231,221,0.07)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: R.control, background: hot ? "#C45D4A" : "#C9A86A", transition: "width .4s ease" }} />
       </div>
     </div>
   );
@@ -1939,7 +1997,7 @@ function CapMeter({ spent, cap }: { spent: bigint; cap: bigint }) {
 /** Shown on a card whose execution a guard is currently blocking. */
 function BlockedNote({ reason }: { reason: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "#C45D4A", fontFamily: MONO, border: "1px solid rgba(196,93,74,0.32)", borderRadius: 7, padding: "6px 10px" }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: T.sm, color: "#C45D4A", fontFamily: MONO, border: "1px solid rgba(196,93,74,0.32)", borderRadius: R.control, padding: "6px 10px" }}>
       ⏻ {reason}
     </span>
   );
@@ -1947,7 +2005,7 @@ function BlockedNote({ reason }: { reason: string }) {
 
 function CancelButton({ id, busy, onCancel, label = "Cancel" }: { id: number; busy: string | null; onCancel: (id: number) => void; label?: string }) {
   return (
-    <button onClick={() => onCancel(id)} disabled={!!busy} className="h-navtext" style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
+    <button onClick={() => onCancel(id)} disabled={!!busy} className="h-navtext" style={{ background: "transparent", border: "1px solid rgba(236,231,221,0.14)", color: "#8A857B", borderRadius: R.control, padding: "9px 14px", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
       {busy === `cancel-${id}` ? "…" : label}
     </button>
   );
@@ -1969,11 +2027,11 @@ function ApprovalDots({ count, threshold, signers, gold }: { count: number; thre
       {Array.from({ length: threshold }).map((_, i) => (
         <span key={i} style={{ width: 11, height: 11, borderRadius: "50%", background: i < count ? (gold ? "#C9A86A" : "#8A857B") : "transparent", border: i < count ? "none" : `1.5px solid ${gold ? "#5a564d" : "#46433c"}` }} />
       ))}
-      <span style={{ fontSize: 13, color: done ? "#C9A86A" : "#8A857B", marginLeft: 4 }}>
+      <span style={{ fontSize: T.sm, color: done ? "#C9A86A" : "#8A857B", marginLeft: 4 }}>
         {done ? `${count} of ${threshold} — threshold met` : `${count} of ${threshold} approvals needed`}
       </span>
       {!!signers && (
-        <span style={{ fontSize: 12, color: "#5a564d" }}>· {signers} signer{signers === 1 ? "" : "s"}</span>
+        <span style={{ fontSize: T.sm, color: "#5a564d" }}>· {signers} signer{signers === 1 ? "" : "s"}</span>
       )}
     </div>
   );
@@ -1982,7 +2040,7 @@ function ApprovalDots({ count, threshold, signers, gold }: { count: number; thre
 /** Shown when a proposal's real content could not be read off the chain. */
 function Unreadable({ what }: { what: string }) {
   return (
-    <div style={{ border: "1px solid rgba(196,93,74,0.35)", background: "rgba(196,93,74,0.06)", borderRadius: 10, padding: "11px 13px", fontSize: 12.5, color: "#D08B77", lineHeight: 1.5 }}>
+    <div style={{ border: "1px solid rgba(196,93,74,0.35)", background: "rgba(196,93,74,0.06)", borderRadius: R.card, padding: "11px 13px", fontSize: T.sm, color: "#D08B77", lineHeight: 1.5 }}>
       The {what} could not be read from the vault. Don&apos;t approve until it shows — the summary above is not the whole proposal.
     </div>
   );
@@ -1990,12 +2048,12 @@ function Unreadable({ what }: { what: string }) {
 
 const detailBox: React.CSSProperties = {
   border: "1px solid rgba(236,231,221,0.08)",
-  borderRadius: 11,
+  borderRadius: R.card,
   background: "rgba(0,0,0,0.22)",
   padding: "12px 14px",
   marginBottom: 20,
 };
-const detailHead: React.CSSProperties = { fontSize: 11, color: "#8A857B", letterSpacing: ".08em", marginBottom: 10 };
+const detailHead: React.CSSProperties = { fontSize: T.xs, color: "#8A857B", letterSpacing: ".08em", marginBottom: 10 };
 
 /**
  * Every payment in a batch, not just the total.
@@ -2017,20 +2075,20 @@ function BatchLines({ items, total }: { items?: BatchItem[]; total: bigint }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {shown.map((it, i) => (
           <div key={i} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-            <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }} title={it.target}>
+            <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }} title={it.target}>
               <span style={{ color: "#5a564d", marginRight: 8 }}>{i + 1}</span>{shortAddr(it.target, 6, 6)}
             </span>
-            <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", whiteSpace: "nowrap" }}>{formatXLMExact(it.amount)} <span style={{ color: "#8A857B" }}>XLM</span></span>
+            <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD", whiteSpace: "nowrap" }}>{formatXLMExact(it.amount)} <span style={{ color: "#8A857B" }}>XLM</span></span>
           </div>
         ))}
       </div>
       {items.length > 5 && (
-        <button onClick={() => setAll((x) => !x)} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, cursor: "pointer", padding: "8px 0 0" }}>
+        <button onClick={() => setAll((x) => !x)} className="h-navtext" style={{ background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", padding: "8px 0 0" }}>
           {all ? "Show fewer" : `Show all ${items.length}`}
         </button>
       )}
       {sum !== total && (
-        <div style={{ marginTop: 10, fontSize: 12, color: "#D08B77" }}>
+        <div style={{ marginTop: 10, fontSize: T.sm, color: "#D08B77" }}>
           These add up to {formatXLMExact(sum)} XLM, but the proposal totals {formatXLMExact(total)} XLM.
         </div>
       )}
@@ -2051,7 +2109,7 @@ function CallArgs({ call }: { call: CallSpec }) {
   return (
     <div style={detailBox}>
       <div style={detailHead}>CALL</div>
-      <div style={{ fontFamily: MONO, fontSize: 13.5, color: "#ECE7DD", marginBottom: call.args.length ? 12 : 0 }}>
+      <div style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD", marginBottom: call.args.length ? 12 : 0 }}>
         {call.function}<span style={{ color: "#8A857B" }}>({call.args.length ? "" : ")"}</span>
       </div>
       {call.args.length > 0 && (
@@ -2061,10 +2119,10 @@ function CallArgs({ call }: { call: CallSpec }) {
               const { text, title, hint } = argLabel(a);
               return (
                 <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", minWidth: 14 }}>{i}</span>
+                  <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d", minWidth: 14 }}>{i}</span>
                   {/* the value may break anywhere — an address has no word
                       boundaries — but the reading beside it is prose */}
-                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD", minWidth: 0 }} title={title}>
+                  <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD", minWidth: 0 }} title={title}>
                     <span style={{ wordBreak: "break-all" }}>{text}</span>
                     {hint && <span style={{ color: "#8A857B", wordBreak: "normal" }}> · {hint}</span>}
                   </span>
@@ -2072,10 +2130,10 @@ function CallArgs({ call }: { call: CallSpec }) {
               );
             })}
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 13.5, color: "#8A857B", marginTop: 10 }}>)</div>
+          <div style={{ fontFamily: MONO, fontSize: T.sm, color: "#8A857B", marginTop: 10 }}>)</div>
         </>
       )}
-      <div style={{ fontSize: 12, color: "#8A857B", marginTop: 12, lineHeight: 1.5 }}>
+      <div style={{ fontSize: T.sm, color: "#8A857B", marginTop: 12, lineHeight: 1.5 }}>
         The vault runs this as itself. Whatever it moves, it moves under the vault&apos;s authority.
       </div>
     </div>
@@ -2092,34 +2150,34 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, b
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled || !!retired;
   return (
-    <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
+    <div style={{ position: "relative", border: "1px solid rgba(201,168,106,0.28)", borderRadius: R.card, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden", opacity: closed ? 0.78 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#C9A86A" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{admin ? <RuleBadge /> : call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
-        <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>proposal #{p.id}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.sm, fontWeight: 600, color: "#C9A86A", letterSpacing: ".04em" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT{admin ? <RuleBadge /> : call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
+        <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>proposal #{p.id}</span>
       </div>
       <div className="vapp-txgrid vapp-wrap" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
+        <div><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
         {admin ? (
           <div style={{ gridColumn: "span 2" }}>
-            <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Change</div>
-            <div style={{ fontSize: 14, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
+            <div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Change</div>
+            <div style={{ fontSize: T.base, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
           </div>
         ) : (
           <>
-            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
+            <div><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
             {call
-              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}</div></div>
-              : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{call.function}</div></div>
+              : <div style={{ textAlign: "right" }}><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: T.sm, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
           </>
         )}
       </div>
       {call ? <CallArgs call={call} /> : st?.is_batch ? <BatchLines items={batch} total={p.amount} /> : null}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.08)" }}>
         {p.executed
-          ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
+          ? <span style={{ fontSize: T.sm, color: "#7FB069", fontWeight: 600 }}>● Executed · settled on-chain</span>
           : cancelled
-            ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
+            ? <span style={{ fontSize: T.sm, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
             : retired
               ? <RetiredNote count={p.approval_count} />
               : <ApprovalDots count={p.approval_count} threshold={threshold} signers={signerCount} gold />}
@@ -2131,10 +2189,10 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, b
             {ready && blocker && <BlockedNote reason={blocker} />}
             {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} label={retired ? "Clear" : "Cancel"} />}
             {ready
-              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-goldbtn" title={blocker ?? undefined} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: busy || blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
+              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-goldbtn" title={blocker ?? undefined} style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "9px 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: busy || blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute"}</button>
               : iApproved
-                ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
-                : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : p.approval_count + 1 >= threshold ? "Approve & settle" : "Approve"}</button>}
+                ? <span style={{ fontSize: T.sm, color: "#7FB069", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>✓ You approved · waiting</span>
+                : <button onClick={() => onApprove(p.id)} disabled={!!busy} className="h-goldbtn" style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "9px 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>{busy === `approve-${p.id}` ? "Approving…" : p.approval_count + 1 >= threshold ? "Approve & settle" : "Approve"}</button>}
           </div>
         )}
       </div>
@@ -2151,7 +2209,7 @@ function TransparentTx({ p, threshold, signerCount, busy, iApproved, st, call, b
  */
 function RetiredNote({ count }: { count: number }) {
   return (
-    <span style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.5 }}>
+    <span style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.5 }}>
       ⃠ Retired — the signer set changed after this was proposed
       {count > 0 && <>, so its {count} approval{count === 1 ? "" : "s"} came from a different group</>}. Propose it again.
     </span>
@@ -2160,15 +2218,15 @@ function RetiredNote({ count }: { count: number }) {
 
 /** A proposal that changes the vault's own rules rather than moving money. */
 function RuleBadge() {
-  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>RULE</span>;
+  return <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: R.control, padding: "1px 5px", marginLeft: 4 }}>RULE</span>;
 }
 
 function CallBadge() {
-  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>CALL</span>;
+  return <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#C9A86A", border: "1px solid rgba(201,168,106,0.4)", borderRadius: R.control, padding: "1px 5px", marginLeft: 4 }}>CALL</span>;
 }
 
 function BatchBadge() {
-  return <span style={{ fontFamily: MONO, fontSize: 9, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
+  return <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#ECE7DD", border: "1px solid rgba(236,231,221,0.24)", borderRadius: R.control, padding: "1px 5px", marginLeft: 4 }}>BATCH</span>;
 }
 
 function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch, admin, retired, blocker, canCancel, onCancel, onApproveZk, onExecute }: TxCardProps & { onApproveZk: (id: number) => void; onExecute: (id: number) => void }) {
@@ -2176,26 +2234,26 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch
   const cancelled = !!st?.cancelled;
   const closed = p.executed || cancelled || !!retired;
   return (
-    <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: closed ? 0.8 : 1 }}>
+    <div style={{ position: "relative", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden", opacity: closed ? 0.8 : 1 }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#46433c" }} />
       <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🕶 ANONYMOUS APPROVALS{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
-        <span style={{ fontFamily: MONO, fontSize: 11, color: "#46433c" }}>proposal #{p.id}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.sm, fontWeight: 600, color: "#8A857B", letterSpacing: ".04em" }}>🕶 ANONYMOUS APPROVALS{call ? <CallBadge /> : st?.is_batch ? <BatchBadge /> : null}</span>
+        <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#46433c" }}>proposal #{p.id}</span>
       </div>
       <div className="vapp-txgrid vapp-wrap" style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginBottom: 20 }}>
-        <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
+        <div><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Proposed by</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{shortAddr(p.proposer)}</div></div>
         {admin ? (
           <div style={{ gridColumn: "span 2" }}>
-            <div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Change</div>
-            <div style={{ fontSize: 14, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
+            <div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Change</div>
+            <div style={{ fontSize: T.base, color: "#ECE7DD", lineHeight: 1.5 }}>{describeAdmin(admin)}</div>
           </div>
         ) : (
           <>
-            <div><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: 14, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
+            <div><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>{call ? "Contract" : "Recipient"}</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{call ? shortAddr(call.contract, 5, 4) : st?.is_batch ? `${batch ? batch.length : "?"} recipients` : shortAddr(p.target)}</div></div>
             {call
-              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: 15, color: "#ECE7DD" }}>{call.function}</div></div>
-              : <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: 22, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
+              ? <div style={{ textAlign: "right" }}><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>Call</div><div style={{ fontFamily: MONO, fontSize: T.base, color: "#ECE7DD" }}>{call.function}</div></div>
+              : <div style={{ textAlign: "right" }}><div style={{ fontSize: T.xs, color: "#8A857B", marginBottom: 6 }}>{st?.is_batch ? "Batch total" : "Amount"}</div><div style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD" }}>{formatXLM(p.amount)} <span style={{ fontSize: T.sm, fontFamily: MONO, color: "#8A857B" }}>XLM</span></div></div>}
           </>
         )}
       </div>
@@ -2205,12 +2263,12 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch
       </div>
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 18, borderTop: "1px solid rgba(236,231,221,0.06)" }}>
         {p.executed
-          ? <span style={{ fontSize: 12, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 executed · the chain never learned who approved</span>
+          ? <span style={{ fontSize: T.sm, color: "#8A857B", display: "inline-flex", alignItems: "center", gap: 8 }}>🔒 executed · the chain never learned who approved</span>
           : cancelled
-            ? <span style={{ fontSize: 13, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
+            ? <span style={{ fontSize: T.sm, color: "#8A857B", fontWeight: 600 }}>✕ Cancelled</span>
             : retired
               ? <RetiredNote count={p.approval_count} />
-              : <span style={{ fontSize: 13, color: "#8A857B" }}>🔒 {p.approval_count} of {threshold} approvals needed, from {signerCount} hidden signer{signerCount === 1 ? "" : "s"}</span>}
+              : <span style={{ fontSize: T.sm, color: "#8A857B" }}>🔒 {p.approval_count} of {threshold} approvals needed, from {signerCount} hidden signer{signerCount === 1 ? "" : "s"}</span>}
         {retired && canCancel && (
           <CancelButton id={p.id} busy={busy} onCancel={onCancel} label="Clear it" />
         )}
@@ -2219,10 +2277,10 @@ function PrivateTx({ p, threshold, signerCount, busy, iApproved, st, call, batch
             {ready && blocker && <BlockedNote reason={blocker} />}
             {canCancel && <CancelButton id={p.id} busy={busy} onCancel={onCancel} label={retired ? "Clear" : "Cancel"} />}
             {ready
-              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-ghost" title={blocker ?? undefined} style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
+              ? <button onClick={() => onExecute(p.id)} disabled={!!busy || !!blocker} className="h-ghost" title={blocker ?? undefined} style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: R.control, padding: "9px 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: blocker ? "not-allowed" : "pointer", opacity: blocker ? 0.45 : 1 }}>{busy === `execute-${p.id}` ? "Executing…" : "Execute (ZK)"}</button>
               : iApproved
-                ? <span style={{ fontSize: 13, color: "#7FB069", fontWeight: 600 }}>✓ You approved · waiting</span>
-                : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: 8, padding: "9px 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>}
+                ? <span style={{ fontSize: T.sm, color: "#7FB069", fontWeight: 600 }}>✓ You approved · waiting</span>
+                : <button onClick={() => onApproveZk(p.id)} disabled={!!busy} className="h-ghost" style={{ background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", borderRadius: R.control, padding: "9px 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer" }}>Approve (ZK)</button>}
           </div>
         )}
       </div>
@@ -2291,103 +2349,103 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 
   return (
     <div>
-      <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 18, padding: 0 }}>← Orbital Treasury</button>
-      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 32, marginBottom: 8 }}>New transaction</h1>
-      <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 28 }}>Choose how much the chain is allowed to reveal — then propose for your co-signers to approve.</p>
+      <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", marginBottom: 18, padding: 0 }}>← Orbital Treasury</button>
+      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, marginBottom: 8 }}>New transaction</h1>
+      <p style={{ fontSize: T.base, color: "#8A857B", marginBottom: 28 }}>Choose how much the chain is allowed to reveal — then propose for your co-signers to approve.</p>
 
-      <div style={{ position: "relative", display: "flex", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 13, padding: 5, marginBottom: 28, maxWidth: 520 }}>
-        <div style={{ position: "absolute", top: 5, bottom: 5, left: 5, width: "calc(50% - 5px)", borderRadius: 9, background: isPrivate ? "rgba(236,231,221,0.04)" : "rgba(201,168,106,0.12)", border: `1px solid ${isPrivate ? "rgba(236,231,221,0.16)" : "rgba(201,168,106,0.45)"}`, transition: "transform .32s cubic-bezier(.4,0,.2,1),background .32s,border-color .32s", transform: isPrivate ? "translateX(100%)" : "translateX(0)" }} />
+      <div style={{ position: "relative", display: "flex", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, padding: 5, marginBottom: 28, maxWidth: 520 }}>
+        <div style={{ position: "absolute", top: 5, bottom: 5, left: 5, width: "calc(50% - 5px)", borderRadius: R.control, background: isPrivate ? "rgba(236,231,221,0.04)" : "rgba(201,168,106,0.12)", border: `1px solid ${isPrivate ? "rgba(236,231,221,0.16)" : "rgba(201,168,106,0.45)"}`, transition: "transform .32s cubic-bezier(.4,0,.2,1),background .32s,border-color .32s", transform: isPrivate ? "translateX(100%)" : "translateX(0)" }} />
         <button onClick={() => setMode("transparent")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#8A857B" : "#C9A86A" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>◎ Transparent</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Everything visible</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.base, fontWeight: 600, whiteSpace: "nowrap" }}>◎ Transparent</span>
+          <span style={{ fontSize: T.xs, color: "#8A857B" }}>Everything visible</span>
         </button>
         <button onClick={() => setMode("private")} style={{ position: "relative", zIndex: 2, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 14, fontFamily: SANS, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: isPrivate ? "#ECE7DD" : "#8A857B" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>🕶 Anonymous approvals</span>
-          <span style={{ fontSize: 11, color: "#8A857B" }}>Hides who approved</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.base, fontWeight: 600, whiteSpace: "nowrap" }}>🕶 Anonymous approvals</span>
+          <span style={{ fontSize: T.xs, color: "#8A857B" }}>Hides who approved</span>
         </button>
       </div>
 
       <div className="vapp-side" style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 28, alignItems: "start", minWidth: 0 }}>
-        <div style={{ border: `1px solid ${isPrivate ? "rgba(236,231,221,0.1)" : "rgba(201,168,106,0.24)"}`, borderRadius: 15, background: isPrivate ? "#0d0d0d" : "linear-gradient(180deg,#15140f,#111110)", padding: 28, transition: "border-color .3s,background .3s" }}>
+        <div style={{ border: `1px solid ${isPrivate ? "rgba(236,231,221,0.1)" : "rgba(201,168,106,0.24)"}`, borderRadius: R.card, background: isPrivate ? "#0d0d0d" : "linear-gradient(180deg,#15140f,#111110)", padding: 28, transition: "border-color .3s,background .3s" }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 22 }}>
             {([["Single payment", "single"], ["Batch", "batch"], ["Contract call", "call"]] as const).map(([label, v]) => (
-              <button key={v} onClick={() => setKind(v)} style={{ flex: 1, background: kind === v ? "rgba(201,168,106,0.12)" : "transparent", border: `1px solid ${kind === v ? "rgba(201,168,106,0.45)" : "rgba(236,231,221,0.10)"}`, color: kind === v ? "#C9A86A" : "#8A857B", borderRadius: 9, padding: "10px 12px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+              <button key={v} onClick={() => setKind(v)} style={{ flex: 1, background: kind === v ? "rgba(201,168,106,0.12)" : "transparent", border: `1px solid ${kind === v ? "rgba(201,168,106,0.45)" : "rgba(236,231,221,0.10)"}`, color: kind === v ? "#C9A86A" : "#8A857B", borderRadius: R.control, padding: "10px 12px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer" }}>{label}</button>
             ))}
           </div>
 
           {kind === "call" ? (
             <>
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Contract</label>
-              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 12, lineHeight: 1.55 }}>
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Contract</label>
+              <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 12, lineHeight: 1.55 }}>
                 The vault calls it <span style={{ color: "#ECE7DD" }}>as itself</span> — a swap, a deposit, or moving an asset this vault wasn&apos;t created with. Only allowlisted contracts can be called.
               </p>
-              <input value={callTarget} onChange={(e) => setCallTarget(e.target.value)} placeholder="C…" style={{ width: "100%", background: "#0d0d0e", border: `1px solid ${callTarget && !callTargetAllowed ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13, marginBottom: 8 }} />
+              <input value={callTarget} onChange={(e) => setCallTarget(e.target.value)} placeholder="C…" style={{ width: "100%", background: "#0d0d0e", border: `1px solid ${callTarget && !callTargetAllowed ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: R.card, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm, marginBottom: 8 }} />
               {allowedContracts.length === 0 ? (
-                <div style={{ fontSize: 12.5, color: "#C45D4A", marginBottom: 18 }}>
+                <div style={{ fontSize: T.sm, color: "#C45D4A", marginBottom: 18 }}>
                   No contracts are allowlisted yet — add one under <span style={{ color: "#C9A86A" }}>Guards</span> before a call can be proposed.
                 </div>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
                   {allowedContracts.map((c) => (
-                    <button key={c} onClick={() => setCallTarget(c)} style={{ background: callTarget.trim() === c ? "rgba(201,168,106,0.12)" : "#0d0d0e", border: `1px solid ${callTarget.trim() === c ? "#C9A86A" : "rgba(236,231,221,0.12)"}`, color: callTarget.trim() === c ? "#C9A86A" : "#8A857B", borderRadius: 7, padding: "6px 10px", fontFamily: MONO, fontSize: 11.5, cursor: "pointer" }}>{shortContract(c)}</button>
+                    <button key={c} onClick={() => setCallTarget(c)} style={{ background: callTarget.trim() === c ? "rgba(201,168,106,0.12)" : "#0d0d0e", border: `1px solid ${callTarget.trim() === c ? "#C9A86A" : "rgba(236,231,221,0.12)"}`, color: callTarget.trim() === c ? "#C9A86A" : "#8A857B", borderRadius: R.control, padding: "6px 10px", fontFamily: MONO, fontSize: T.xs, cursor: "pointer" }}>{shortContract(c)}</button>
                   ))}
                 </div>
               )}
 
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Function</label>
-              <input value={callFn} onChange={(e) => setCallFn(e.target.value)} placeholder="transfer" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Function</label>
+              <input value={callFn} onChange={(e) => setCallFn(e.target.value)} placeholder="transfer" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.base, marginBottom: 22 }} />
 
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Arguments</label>
-              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 14, lineHeight: 1.55 }}>
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Arguments</label>
+              <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14, lineHeight: 1.55 }}>
                 Soroban is typed, so each argument needs its type — a number alone doesn&apos;t say whether it&apos;s an <span style={{ fontFamily: MONO }}>i128</span> or a <span style={{ fontFamily: MONO }}>u32</span>. Order must match the function&apos;s signature.
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
                 {callArgs.map((a, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontFamily: MONO, fontSize: 11, color: "#5a564d", width: 16 }}>{i}</span>
-                    <select value={a.type} onChange={(e) => setArgAt(i, { type: e.target.value as CallArgType })} style={{ background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 9px", color: "#C9A86A", fontFamily: MONO, fontSize: 12.5 }}>
+                    <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#5a564d", width: 16 }}>{i}</span>
+                    <select value={a.type} onChange={(e) => setArgAt(i, { type: e.target.value as CallArgType })} style={{ background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "11px 9px", color: "#C9A86A", fontFamily: MONO, fontSize: T.sm }}>
                       {["address", "i128", "u32", "u64", "bool", "symbol", "string"].map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
-                    <input value={a.value} onChange={(e) => setArgAt(i, { value: e.target.value })} placeholder={a.type === "address" ? "G… / C…" : a.type === "bool" ? "true" : "value"} style={{ flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
-                    <button onClick={() => setCallArgs((xs) => xs.filter((_, j) => j !== i))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 18, padding: "0 4px" }}>×</button>
+                    <input value={a.value} onChange={(e) => setArgAt(i, { value: e.target.value })} placeholder={a.type === "address" ? "G… / C…" : a.type === "bool" ? "true" : "value"} style={{ flex: 1, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm }} />
+                    <button onClick={() => setCallArgs((xs) => xs.filter((_, j) => j !== i))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: T.lg, padding: "0 4px" }}>×</button>
                   </div>
                 ))}
               </div>
-              <button onClick={() => setCallArgs((xs) => [...xs, { type: "address", value: "" }])} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer", marginBottom: 22 }}>+ Add argument</button>
+              <button onClick={() => setCallArgs((xs) => [...xs, { type: "address", value: "" }])} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, padding: 10, width: "100%", borderRadius: R.control, cursor: "pointer", marginBottom: 22 }}>+ Add argument</button>
             </>
           ) : kind === "single" ? (
             <>
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Recipient address</label>
-              <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="G…" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14, marginBottom: 22 }} />
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Amount</label>
-              <div style={{ display: "flex", alignItems: "center", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 10, padding: "0 15px", marginBottom: 22 }}>
-                <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, background: "transparent", border: "none", padding: "14px 0", color: "#ECE7DD", fontFamily: DISPLAY, fontSize: 22 }} />
-                <span style={{ fontFamily: MONO, fontSize: 13, color: "#8A857B", borderLeft: "1px solid rgba(236,231,221,0.1)", paddingLeft: 14 }}>XLM</span>
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Recipient address</label>
+              <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="G…" style={{ width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, padding: "13px 15px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.base, marginBottom: 22 }} />
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 10 }}>Amount</label>
+              <div style={{ display: "flex", alignItems: "center", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.card, padding: "0 15px", marginBottom: 22 }}>
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, background: "transparent", border: "none", padding: "14px 0", color: "#ECE7DD", fontFamily: DISPLAY, fontSize: T.xl }} />
+                <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#8A857B", borderLeft: "1px solid rgba(236,231,221,0.1)", paddingLeft: 14 }}>XLM</span>
               </div>
             </>
           ) : (
             <>
-              <label style={{ display: "block", fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Payments</label>
-              <p style={{ fontSize: 12.5, color: "#8A857B", marginBottom: 14, lineHeight: 1.5 }}>One approval round for all of them — they settle together or not at all. Up to 20 per batch.</p>
+              <label style={{ display: "block", fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 6 }}>Payments</label>
+              <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14, lineHeight: 1.5 }}>One approval round for all of them — they settle together or not at all. Up to 20 per batch.</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
                 {rows.map((r, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input value={r.target} onChange={(e) => setRowAt(i, { target: e.target.value })} placeholder="G…" style={{ flex: 1, background: "#0d0d0e", border: `1px solid ${r.target && !validAddr(r.target) ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
-                    <input value={r.amount} onChange={(e) => setRowAt(i, { amount: e.target.value })} placeholder="0.00" style={{ width: 110, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: 13 }} />
-                    <button onClick={() => setRows((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 18, padding: "0 4px" }}>×</button>
+                    <input value={r.target} onChange={(e) => setRowAt(i, { target: e.target.value })} placeholder="G…" style={{ flex: 1, background: "#0d0d0e", border: `1px solid ${r.target && !validAddr(r.target) ? "rgba(196,93,74,0.5)" : "rgba(236,231,221,0.10)"}`, borderRadius: R.control, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm }} />
+                    <input value={r.amount} onChange={(e) => setRowAt(i, { amount: e.target.value })} placeholder="0.00" style={{ width: 110, background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "11px 13px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.sm }} />
+                    <button onClick={() => setRows((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs))} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: T.lg, padding: "0 4px" }}>×</button>
                   </div>
                 ))}
               </div>
-              <button onClick={() => setRows((xs) => (xs.length < 20 ? [...xs, { target: "", amount: "" }] : xs))} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: 13, padding: 10, width: "100%", borderRadius: 9, cursor: "pointer", marginBottom: 18 }}>+ Add payment</button>
+              <button onClick={() => setRows((xs) => (xs.length < 20 ? [...xs, { target: "", amount: "" }] : xs))} className="h-addsigner" style={{ background: "transparent", border: "1px dashed rgba(236,231,221,0.18)", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, padding: 10, width: "100%", borderRadius: R.control, cursor: "pointer", marginBottom: 18 }}>+ Add payment</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: "1px solid rgba(236,231,221,0.08)", paddingTop: 14, marginBottom: 22 }}>
-                <span style={{ fontSize: 13, color: "#8A857B" }}>Batch total · {rows.length} payment{rows.length === 1 ? "" : "s"}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 24, color: "#ECE7DD" }}>{formatXLM(batchTotal)} <span style={{ fontSize: 12, fontFamily: MONO, color: "#8A857B" }}>XLM</span></span>
+                <span style={{ fontSize: T.sm, color: "#8A857B" }}>Batch total · {rows.length} payment{rows.length === 1 ? "" : "s"}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: T.xl, color: "#ECE7DD" }}>{formatXLM(batchTotal)} <span style={{ fontSize: T.sm, fontFamily: MONO, color: "#8A857B" }}>XLM</span></span>
               </div>
             </>
           )}
 
           {kind !== "call" && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#8A857B", marginBottom: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: T.sm, color: "#8A857B", marginBottom: 22 }}>
               <span>Vault balance · {balance != null ? formatXLM(balance) : "—"} XLM</span>
               {!batchMode && <span style={{ color: "#C9A86A", cursor: "pointer" }} onClick={() => balance != null && setAmount(formatXLM(balance).replace(/,/g, ""))}>Max</span>}
             </div>
@@ -2395,36 +2453,36 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
 
           {/* a refusal and a heads-up are different things — never in the same box */}
           {kind === "call" && (
-            <div style={{ border: "1px solid rgba(201,168,106,0.22)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
-              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 9 }}>HOW GUARDS APPLY HERE</div>
-              <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.65 }}>
+            <div style={{ border: "1px solid rgba(201,168,106,0.22)", borderRadius: R.card, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+              <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 9 }}>HOW GUARDS APPLY HERE</div>
+              <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.65 }}>
                 The threshold and the time-lock still apply. The amount guards don&apos;t — a call carries no amount the vault can read, so <span style={{ color: "#ECE7DD" }}>the allowlist is the guard</span>: it can only call contracts you approved.
               </div>
             </div>
           )}
 
           {kind !== "call" && guardWarnings.length > 0 && (
-            <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 14 }}>
-              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>GUARDS WILL REJECT THIS</div>
+            <div style={{ border: "1px solid rgba(196,93,74,0.32)", borderRadius: R.card, background: "#0c0c0d", padding: 16, marginBottom: 14 }}>
+              <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 9 }}>GUARDS WILL REJECT THIS</div>
               {guardWarnings.map((w) => (
-                <div key={w} style={{ fontSize: 12.5, color: "#ECE7DD", lineHeight: 1.6 }}>• {w}</div>
+                <div key={w} style={{ fontSize: T.sm, color: "#ECE7DD", lineHeight: 1.6 }}>• {w}</div>
               ))}
             </div>
           )}
           {kind !== "call" && timelockNote && (
-            <div style={{ display: "flex", gap: 10, border: "1px solid rgba(201,168,106,0.22)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22 }}>
+            <div style={{ display: "flex", gap: 10, border: "1px solid rgba(201,168,106,0.22)", borderRadius: R.card, background: "#0c0c0d", padding: 14, marginBottom: 22 }}>
               <span style={{ color: "#C9A86A", lineHeight: 1.4 }}>⏻</span>
-              <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>
+              <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.55 }}>
                 <span style={{ color: "#ECE7DD" }}>This will propose fine.</span> {timelockNote}
               </div>
             </div>
           )}
           {isPrivate && (
-            <div className="vs-rise" style={{ display: "flex", gap: 12, border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
-              <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
+            <div className="vs-rise" style={{ display: "flex", gap: 12, border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.card, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+              <span style={{ fontSize: T.lg, lineHeight: 1 }}>🔒</span>
               <div>
-                <div style={{ fontSize: 13, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>Approver identities will be hidden</div>
-                <div style={{ fontSize: 12.5, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount and recipient — they are approving it — but each approval is a zero-knowledge proof, so the chain records only a nullifier and never <span style={{ color: "#ECE7DD" }}>who</span> signed. This hides the approvers, not the amount. To hide <span style={{ color: "#ECE7DD" }}>how much</span>, pay from the vault&apos;s hidden balance instead.</div>
+                <div style={{ fontSize: T.sm, color: "#ECE7DD", fontWeight: 600, marginBottom: 5 }}>Approver identities will be hidden</div>
+                <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.55 }}>Co-signers see the amount and recipient — they are approving it — but each approval is a zero-knowledge proof, so the chain records only a nullifier and never <span style={{ color: "#ECE7DD" }}>who</span> signed. This hides the approvers, not the amount. To hide <span style={{ color: "#ECE7DD" }}>how much</span>, pay from the vault&apos;s hidden balance instead.</div>
               </div>
             </div>
           )}
@@ -2444,7 +2502,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
                     ? `Propose batch of ${rows.length} · sign with wallet`
                     : "Propose · sign with wallet";
             return (
-              <button onClick={submit} disabled={disabled} className={blocked ? undefined : "h-goldbtn"} style={{ width: "100%", background: blocked ? "transparent" : "#C9A86A", color: blocked ? "#C45D4A" : "#0A0A0B", border: blocked ? "1px solid rgba(196,93,74,0.4)" : "none", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled && !blocked ? 0.5 : 1 }}>
+              <button onClick={submit} disabled={disabled} className={blocked ? undefined : "h-goldbtn"} style={{ width: "100%", background: blocked ? "transparent" : "#C9A86A", color: blocked ? "#C45D4A" : "#0A0A0B", border: blocked ? "1px solid rgba(196,93,74,0.4)" : "none", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 15, borderRadius: R.card, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled && !blocked ? 0.5 : 1 }}>
                 {label}
               </button>
             );
@@ -2452,11 +2510,11 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
         </div>
 
         <div style={{ position: "sticky", top: 96 }}>
-          <div style={{ fontSize: 11, color: "#8A857B", fontFamily: MONO, letterSpacing: ".16em", marginBottom: 12 }}>HOW CO-SIGNERS WILL SEE IT</div>
+          <div style={{ fontSize: T.xs, color: "#8A857B", fontFamily: MONO, letterSpacing: ".16em", marginBottom: 12 }}>HOW CO-SIGNERS WILL SEE IT</div>
           {!isPrivate ? (
-            <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(201,168,106,0.3)", borderRadius: 14, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden" }}>
+            <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(201,168,106,0.3)", borderRadius: R.card, background: "linear-gradient(180deg,#16150f,#121210)", padding: 22, overflow: "hidden" }}>
               <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,#C9A86A,transparent)" }} />
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#C9A86A", marginBottom: 18 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.sm, fontWeight: 600, color: "#C9A86A", marginBottom: 18 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#C9A86A", boxShadow: "0 0 10px #C9A86A" }} />TRANSPARENT</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} valueNote={batchMode ? "every payment listed on their card" : undefined} mono />
@@ -2470,9 +2528,9 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
               </div>
             </div>
           ) : (
-            <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(236,231,221,0.1)", borderRadius: 14, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden" }}>
+            <div className="vs-rise" style={{ position: "relative", border: "1px solid rgba(236,231,221,0.1)", borderRadius: R.card, background: "linear-gradient(180deg,#0f0f0f,#0c0c0d)", padding: 22, overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(115deg,rgba(236,231,221,0.016) 0 2px,transparent 2px 9px)", pointerEvents: "none" }} />
-              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🕶 ANONYMOUS APPROVALS</span>
+              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8, fontSize: T.sm, fontWeight: 600, color: "#8A857B", marginBottom: 18 }}>🕶 ANONYMOUS APPROVALS</span>
               <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 14, marginTop: 6 }}>
                 <Row label="Proposed by" value="You" />
                 <Row label={kind === "call" ? "Contract" : "Recipient"} value={kind === "call" ? (callTarget ? shortAddr(callTarget, 5, 4) : "C…") : batchMode ? `${rows.length} recipients` : target ? shortAddr(target) : "G…"} valueNote={batchMode ? "every payment listed on their card" : undefined} mono />
@@ -2484,7 +2542,7 @@ function Propose({ go, mode, setMode, submitPropose, submitBatch, submitCall, bu
                 <div style={{ height: 1, background: "rgba(236,231,221,0.06)" }} />
                 <Row label="Approvals" valueNode={<span style={{ color: "#8A857B" }}>🔒 voter identities hidden (ZK)</span>} />
               </div>
-              <div style={{ position: "relative", marginTop: 16, display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 10, color: "#8A857B" }}>
+              <div style={{ position: "relative", marginTop: 16, display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>
                 <Pill>ZK · Groth16</Pill><Pill>nullifier-gated</Pill>
               </div>
             </div>
@@ -2558,13 +2616,13 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
     setAllowlistOnly(policy.allowlist_only);
   }, [policy]);
 
-  const card: React.CSSProperties = { border: "1px solid rgba(236,231,221,0.08)", borderRadius: 15, background: "#121211", padding: 26, marginBottom: 18 };
-  const input: React.CSSProperties = { width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: 9, padding: "12px 14px", color: "#ECE7DD", fontFamily: MONO, fontSize: 14 };
+  const card: React.CSSProperties = { border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.card, background: "#121211", padding: 26, marginBottom: 18 };
+  const input: React.CSSProperties = { width: "100%", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.10)", borderRadius: R.control, padding: "12px 14px", color: "#ECE7DD", fontFamily: MONO, fontSize: T.base };
   const chip = (active: boolean): React.CSSProperties => ({
     background: active ? "rgba(201,168,106,0.12)" : "#0d0d0e",
     border: `1px solid ${active ? "#C9A86A" : "rgba(236,231,221,0.12)"}`,
     color: active ? "#C9A86A" : "#8A857B",
-    borderRadius: 8, padding: "9px 14px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer",
+    borderRadius: R.control, padding: "9px 14px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer",
   });
 
   // A limit of zero is how the contract spells "no limit", so an empty box and
@@ -2595,17 +2653,17 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: 13, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
-      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 34, marginBottom: 8 }}>Guards</h1>
-      <p style={{ fontSize: 14, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
+      <button onClick={() => go("vault")} className="h-navtext" style={{ background: "transparent", border: "none", color: "#8A857B", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", marginBottom: 20, padding: 0 }}>← Back to vault</button>
+      <h1 style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xxl, marginBottom: 8 }}>Guards</h1>
+      <p style={{ fontSize: T.base, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
         Rules the contract enforces on every execution — on top of the m-of-n threshold. This is what a smart-contract vault can do that native multi-sig can&apos;t.
       </p>
-      <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
+      <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 12, lineHeight: 1.6 }}>
         Changing any of them is a proposal, approved at the same threshold as a payment. No single key — the owner&apos;s included — can move a guard, the signer set, or the vault&apos;s own code.
       </p>
 
       {!isSigner && (
-        <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: 11, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: 13, color: "#8A857B" }}>
+        <div style={{ border: "1px solid rgba(236,231,221,0.12)", borderRadius: R.card, background: "#0c0c0d", padding: 14, marginBottom: 22, fontSize: T.sm, color: "#8A857B" }}>
           Read-only — only this vault's signers can propose a change to its guards.
         </div>
       )}
@@ -2614,17 +2672,17 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
           at a newer build only affects vaults created after. So a fix reaches an
           existing vault through here, or not at all. */}
       {version === null ? (
-        <div style={{ border: "1px solid rgba(196,93,74,0.3)", borderRadius: 11, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 8 }}>OLDEST BUILD</div>
-          <div style={{ fontSize: 13, color: "#8A857B", lineHeight: 1.6 }}>
+        <div style={{ border: "1px solid rgba(196,93,74,0.3)", borderRadius: R.card, background: "#0c0c0d", padding: 16, marginBottom: 22 }}>
+          <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#C45D4A", marginBottom: 8 }}>OLDEST BUILD</div>
+          <div style={{ fontSize: T.sm, color: "#8A857B", lineHeight: 1.6 }}>
             This vault predates versioning and has no upgrade entry point, so it cannot be moved forward — guards, contract calls and hidden amounts will never appear on it. Its funds are safe; create a new vault to use the current features.
           </div>
         </div>
       ) : (
         behind && (
-          <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: 11, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
-            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
-            <div style={{ fontSize: 13, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
+          <div style={{ border: "1px solid rgba(201,168,106,0.35)", borderRadius: R.card, background: "linear-gradient(180deg,#16150f,#121210)", padding: 16, marginBottom: 22 }}>
+            <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#C9A86A", marginBottom: 8 }}>OLDER BUILD · v{version}</div>
+            <div style={{ fontSize: T.sm, color: "#ECE7DD", lineHeight: 1.6, marginBottom: 14 }}>
               This vault runs older code than new vaults are created with:
               <ul style={{ margin: "9px 0 0", paddingLeft: 18, color: "#8A857B", lineHeight: 1.7 }}>
                 {gapsFor(version ?? 0).map((r) => <li key={r}>{r}</li>)}
@@ -2632,25 +2690,25 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
               <div style={{ marginTop: 9 }}>Upgrading keeps its address, balance, signers and guards exactly as they are.</div>
             </div>
             {isSigner ? (
-              <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
+              <button onClick={onUpgrade} disabled={busy === "upgrade"} className="h-goldbtn" style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 13, border: "none", borderRadius: R.card, cursor: "pointer", opacity: busy === "upgrade" ? 0.6 : 1 }}>
                 {busy === "upgrade" ? "Proposing…" : "Propose the upgrade"}
               </button>
             ) : (
-              <div style={{ fontSize: 12.5, color: "#5a564d", fontStyle: "italic" }}>Only a signer can propose the upgrade.</div>
+              <div style={{ fontSize: T.sm, color: "#5a564d", fontStyle: "italic" }}>Only a signer can propose the upgrade.</div>
             )}
           </div>
         )
       )}
 
       <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Per-transaction limit</div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>The largest single execution allowed. Leave empty for no limit. A batch is judged on its total.</p>
+        <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Per-transaction limit</div>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14 }}>The largest single execution allowed. Leave empty for no limit. A batch is judged on its total.</p>
         <input value={maxPerTx} onChange={(e) => setMaxPerTx(e.target.value)} disabled={!isSigner} placeholder="No limit" style={input} />
       </div>
 
       <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Spending cap</div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A rolling budget: total executed within one window can't exceed this. Empty = uncapped.</p>
+        <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Spending cap</div>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14 }}>A rolling budget: total executed within one window can't exceed this. Empty = uncapped.</p>
         <input value={cap} onChange={(e) => setCap(e.target.value)} disabled={!isSigner} placeholder="Uncapped" style={{ ...input, marginBottom: 14 }} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CAP_WINDOWS.map(([label, v]) => (
@@ -2661,8 +2719,8 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
       </div>
 
       <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Time-lock</div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14 }}>A cooling-off period between proposing and executing — the window in which co-signers can cancel a bad transaction.</p>
+        <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Time-lock</div>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14 }}>A cooling-off period between proposing and executing — the window in which co-signers can cancel a bad transaction.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {TIMELOCK_PRESETS.map(([label, v]) => (
             <button key={label} onClick={() => isSigner && setTimelock(v)} disabled={!isSigner} style={chip(timelock === v)}>{label}</button>
@@ -2672,21 +2730,21 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
 
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Recipient allowlist</div>
+          <div style={{ fontWeight: 600, fontSize: T.base }}>Recipient allowlist</div>
           <button onClick={() => isSigner && setAllowlistOnly(!allowlistOnly)} disabled={!isSigner} style={chip(allowlistOnly)}>{allowlistOnly ? "On" : "Off"}</button>
         </div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16 }}>When on, funds can only go to addresses on this list — proposals to anyone else are refused at propose time and again at execute.</p>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 16 }}>When on, funds can only go to addresses on this list — proposals to anyone else are refused at propose time and again at execute.</p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
           {allowed.map((a) => (
-            <div key={a} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(a, 8, 6)}</span>
+            <div key={a} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.control, padding: "10px 13px" }}>
+              <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }}>{shortAddr(a, 8, 6)}</span>
               {isSigner && (
-                <button onClick={() => onAllowRecipient(a, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
+                <button onClick={() => onAllowRecipient(a, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: T.sm }}>remove</button>
               )}
             </div>
           ))}
-          {!allowed.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>No recipients allowed yet — turning the allowlist on now would block every payment.</div>}
+          {!allowed.length && <div style={{ fontSize: T.sm, color: "#5a564d", fontStyle: "italic" }}>No recipients allowed yet — turning the allowlist on now would block every payment.</div>}
         </div>
 
         {isSigner && (
@@ -2696,28 +2754,28 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
               onClick={() => { onAllowRecipient(newRecipient.trim(), true); setNewRecipient(""); }}
               disabled={!/^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) || !!busy}
               className="h-goldbtn"
-              style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) ? 1 : 0.45 }}
+              style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "0 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer", opacity: /^[GC][A-Z2-7]{55}$/.test(newRecipient.trim()) ? 1 : 0.45 }}
             >Allow</button>
           </div>
         )}
       </div>
 
       <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Callable contracts</div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Callable contracts</div>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
           Proposals can call these contracts — a DEX, a lending market, another token. Nothing outside the list is callable, and the list starts empty. This is the guard for calls: the amount limits can&apos;t apply, because a call carries no amount the vault can read.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
           {allowedContracts.map((c) => (
-            <div key={c} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: 9, padding: "10px 13px" }}>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ECE7DD" }}>{shortAddr(c, 8, 6)}</span>
+            <div key={c} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d0d0e", border: "1px solid rgba(236,231,221,0.08)", borderRadius: R.control, padding: "10px 13px" }}>
+              <span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }}>{shortAddr(c, 8, 6)}</span>
               {isSigner && (
-                <button onClick={() => onAllowContract(c, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: 13 }}>remove</button>
+                <button onClick={() => onAllowContract(c, false)} disabled={!!busy} className="h-x" style={{ background: "transparent", border: "none", color: "#5a564d", cursor: "pointer", fontSize: T.sm }}>remove</button>
               )}
             </div>
           ))}
-          {!allowedContracts.length && <div style={{ fontSize: 13, color: "#5a564d", fontStyle: "italic" }}>None — this vault cannot call any contract.</div>}
+          {!allowedContracts.length && <div style={{ fontSize: T.sm, color: "#5a564d", fontStyle: "italic" }}>None — this vault cannot call any contract.</div>}
         </div>
 
         {isSigner && (
@@ -2728,10 +2786,10 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
                 onClick={() => { onAllowContract(newCallee.trim(), true); setNewCallee(""); }}
                 disabled={!/^C[A-Z2-7]{55}$/.test(newCallee.trim()) || !!busy}
                 className="h-goldbtn"
-                style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: 9, padding: "0 18px", fontFamily: SANS, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: /^C[A-Z2-7]{55}$/.test(newCallee.trim()) ? 1 : 0.45 }}
+                style={{ background: "#C9A86A", color: "#0A0A0B", border: "none", borderRadius: R.control, padding: "0 18px", fontFamily: SANS, fontSize: T.sm, fontWeight: 600, cursor: "pointer", opacity: /^C[A-Z2-7]{55}$/.test(newCallee.trim()) ? 1 : 0.45 }}
               >Allow</button>
             </div>
-            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
+            <p style={{ fontSize: T.xs, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
               The vault itself can never be added — one passing proposal would otherwise be able to lift every guard.
             </p>
           </>
@@ -2740,51 +2798,51 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
 
       <div style={{ ...card, borderColor: zkConfig ? "rgba(127,176,105,0.3)" : "rgba(236,231,221,0.08)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>On-chain proof verification</div>
-          <span style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".12em", color: zkConfig ? "#7FB069" : "#C45D4A", border: `1px solid ${zkConfig ? "rgba(127,176,105,0.4)" : "rgba(196,93,74,0.35)"}`, borderRadius: 6, padding: "3px 8px" }}>
+          <div style={{ fontWeight: 600, fontSize: T.base }}>On-chain proof verification</div>
+          <span style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".12em", color: zkConfig ? "#7FB069" : "#C45D4A", border: `1px solid ${zkConfig ? "rgba(127,176,105,0.4)" : "rgba(196,93,74,0.35)"}`, borderRadius: R.control, padding: "3px 8px" }}>
             {zkConfig ? "ENFORCED" : "NOT ENFORCED"}
           </span>
         </div>
         {zkConfig ? (
           <>
-            <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+            <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
               Every ZK approval is verified by a Groth16 verifier contract, and its public inputs are pinned to this vault, this signer set and the specific proposal. A proof for another vault, or against a signer set you never published, is refused.
             </p>
-            <PolicyRow label="Verifier" valueNode={<span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{shortAddr(zkConfig.verifier, 6, 5)}</span>} />
-            <PolicyRow label="Signer root" valueNode={<span style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A857B" }}>0x{zkConfig.signer_root.toString(16).slice(0, 14)}…</span>} />
-            <PolicyRow label="Published leaves" valueNode={<span style={{ fontFamily: MONO, fontSize: 12, color: "#ECE7DD" }}>{commitments.length}</span>} />
-            <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
+            <PolicyRow label="Verifier" valueNode={<span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }}>{shortAddr(zkConfig.verifier, 6, 5)}</span>} />
+            <PolicyRow label="Signer root" valueNode={<span style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>0x{zkConfig.signer_root.toString(16).slice(0, 14)}…</span>} />
+            <PolicyRow label="Published leaves" valueNode={<span style={{ fontFamily: MONO, fontSize: T.sm, color: "#ECE7DD" }}>{commitments.length}</span>} />
+            <p style={{ fontSize: T.xs, color: "#5a564d", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
               Leaves are published in a shuffled order. A list in signer order would let anyone match a nullifier back to the signer who produced it.
             </p>
           </>
         ) : (
-          <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 4, lineHeight: 1.6 }}>
+          <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 4, lineHeight: 1.6 }}>
             This vault records the nullifier of a ZK approval but does not check the proof. Publish a signer set below to turn on real verification.
           </p>
         )}
       </div>
 
       <div style={card}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Your signing key</div>
-        <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Your signing key</div>
+        <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 16, lineHeight: 1.6 }}>
           Your approval key is derived from a wallet signature, so only you can produce it and nobody can guess your commitment. Derive it here and send the value to the vault owner — over any channel. The secret behind it never leaves this browser, and nothing is written on-chain.
         </p>
-        <button onClick={onRegisterKey} disabled={busy === "register"} className="h-goldbtn" style={{ width: "100%", background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, borderRadius: 10, cursor: "pointer", opacity: busy === "register" ? 0.6 : 1 }}>
+        <button onClick={onRegisterKey} disabled={busy === "register"} className="h-goldbtn" style={{ width: "100%", background: "transparent", color: "#C9A86A", border: "1px solid rgba(201,168,106,0.45)", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 13, borderRadius: R.card, cursor: "pointer", opacity: busy === "register" ? 0.6 : 1 }}>
           {busy === "register" ? "Check Freighter…" : "Derive my commitment"}
         </button>
         {myLeaf != null && (
-          <div style={{ marginTop: 14, border: "1px solid rgba(127,176,105,0.3)", borderRadius: 10, background: "#0c0c0d", padding: 14 }}>
-            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: ".14em", color: "#7FB069", marginBottom: 8 }}>YOUR COMMITMENT</div>
-            <div style={{ fontFamily: MONO, fontSize: 11.5, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.5 }}>{myLeaf.toString()}</div>
-            <button onClick={() => navigator.clipboard?.writeText(myLeaf.toString())} className="h-copy" style={{ marginTop: 10, background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: 12.5, cursor: "pointer", padding: 0 }}>⧉ copy</button>
+          <div style={{ marginTop: 14, border: "1px solid rgba(127,176,105,0.3)", borderRadius: R.card, background: "#0c0c0d", padding: 14 }}>
+            <div style={{ fontFamily: MONO, fontSize: T.xs, letterSpacing: ".14em", color: "#7FB069", marginBottom: 8 }}>YOUR COMMITMENT</div>
+            <div style={{ fontFamily: MONO, fontSize: T.xs, color: "#ECE7DD", wordBreak: "break-all", lineHeight: 1.5 }}>{myLeaf.toString()}</div>
+            <button onClick={() => navigator.clipboard?.writeText(myLeaf.toString())} className="h-copy" style={{ marginTop: 10, background: "transparent", border: "none", color: "#C9A86A", fontFamily: SANS, fontSize: T.sm, cursor: "pointer", padding: 0 }}>⧉ copy</button>
           </div>
         )}
       </div>
 
       {isSigner && (
         <div style={card}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Publish the signer set</div>
-          <p style={{ fontSize: 13, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 600, fontSize: T.base, marginBottom: 6 }}>Publish the signer set</div>
+          <p style={{ fontSize: T.sm, color: "#8A857B", marginBottom: 14, lineHeight: 1.6 }}>
             Paste one commitment per signer, collected from each of them. They get shuffled before publishing, so the on-chain order says nothing about who is who — then the root is pinned and verification is live.
           </p>
           <textarea
@@ -2792,17 +2850,17 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
             onChange={(e) => setPastedLeaves(e.target.value)}
             placeholder={"1234…\n5678…\n9012…"}
             rows={4}
-            style={{ ...input, width: "100%", resize: "vertical", fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}
+            style={{ ...input, width: "100%", resize: "vertical", fontSize: T.sm, lineHeight: 1.5, marginBottom: 12 }}
           />
           <button
             onClick={() => onPublishSignerSet(pastedLeaves)}
             disabled={!pastedLeaves.trim() || busy === "zk"}
             className="h-goldbtn"
-            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 14, padding: 13, border: "none", borderRadius: 10, cursor: "pointer", opacity: pastedLeaves.trim() && busy !== "zk" ? 1 : 0.45 }}
+            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 13, border: "none", borderRadius: R.card, cursor: "pointer", opacity: pastedLeaves.trim() && busy !== "zk" ? 1 : 0.45 }}
           >
             {busy === "zk" ? "Publishing…" : zkConfig ? "Republish signer set" : "Publish & enable verification"}
           </button>
-          <p style={{ fontSize: 11.5, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
+          <p style={{ fontSize: T.xs, color: "#5a564d", marginTop: 10, fontFamily: MONO, lineHeight: 1.6 }}>
             Adding or removing a signer means republishing, or their proofs stop verifying.
           </p>
         </div>
@@ -2810,16 +2868,16 @@ function Guards({ behind, go, wallet, config, policy, allowed, spent, busy, zkCo
 
       {isSigner && (
         <>
-          {parseError && <div style={{ fontSize: 13, color: "#C45D4A", marginBottom: 12 }}>{parseError}</div>}
+          {parseError && <div style={{ fontSize: T.sm, color: "#C45D4A", marginBottom: 12 }}>{parseError}</div>}
           <button
             onClick={() => next && onSave(next)}
             disabled={!dirty || !!parseError || busy === "policy"}
             className="h-goldbtn"
-            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: 15, padding: 15, border: "none", borderRadius: 11, cursor: dirty ? "pointer" : "not-allowed", opacity: dirty && !parseError ? 1 : 0.45 }}
+            style={{ width: "100%", background: "#C9A86A", color: "#0A0A0B", fontFamily: SANS, fontWeight: 600, fontSize: T.base, padding: 15, border: "none", borderRadius: R.card, cursor: dirty ? "pointer" : "not-allowed", opacity: dirty && !parseError ? 1 : 0.45 }}
           >
             {busy === "policy" ? "Proposing · check Freighter…" : dirty ? "Propose these guards · sign with wallet" : "No changes to propose"}
           </button>
-          <p style={{ fontSize: 11.5, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
+          <p style={{ fontSize: T.xs, color: "#5a564d", textAlign: "center", marginTop: 12, fontFamily: MONO, lineHeight: 1.6 }}>
             Nothing changes until the signers approve it and it is executed.<br />
             Guards apply to pending proposals too — tightening a limit can block one that was already approved.
           </p>
@@ -2839,26 +2897,26 @@ function ProofOverlay({ stage }: { stage: number }) {
   };
   const steps = [
     { s: step(0), label: <>Computing witness</> },
-    { s: step(1), label: <>Generating proof <span style={{ fontFamily: MONO, fontSize: 11, color: "#8A857B" }}>(Groth16)</span></> },
+    { s: step(1), label: <>Generating proof <span style={{ fontFamily: MONO, fontSize: T.xs, color: "#8A857B" }}>(Groth16)</span></> },
     { s: step(2), label: <>Submitting to chain</> },
   ];
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(8,8,9,0.86)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div className="vs-rise" style={{ position: "relative", width: 480, border: "1px solid rgba(201,168,106,0.24)", borderRadius: 20, background: "linear-gradient(180deg,#141413,#0e0e0f)", padding: 40, overflow: "hidden", boxShadow: "0 40px 100px rgba(0,0,0,0.6)" }}>
+      <div className="vs-rise" style={{ position: "relative", width: 480, border: "1px solid rgba(201,168,106,0.24)", borderRadius: R.card, background: "linear-gradient(180deg,#141413,#0e0e0f)", padding: 40, overflow: "hidden", boxShadow: "0 40px 100px rgba(0,0,0,0.6)" }}>
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 60, background: "linear-gradient(180deg,rgba(201,168,106,0.06),transparent)", pointerEvents: "none" }} />
         <div style={{ width: 96, height: 96, margin: "0 auto 28px", position: "relative" }}>
           <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px solid rgba(201,168,106,0.16)" }} />
           <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px solid transparent", borderTopColor: "#C9A86A", borderRightColor: "#C9A86A", animation: "vsSpin 1.1s linear infinite" }} />
           <div style={{ position: "absolute", inset: 14, borderRadius: "50%", border: "1px dashed rgba(201,168,106,0.3)", animation: "vsSpinR 3s linear infinite" }} />
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ width: 14, height: 14, borderRadius: 4, background: "#C9A86A", boxShadow: "0 0 20px rgba(201,168,106,0.7)" }} /></div>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ width: 14, height: 14, borderRadius: R.control, background: "#C9A86A", boxShadow: "0 0 20px rgba(201,168,106,0.7)" }} /></div>
         </div>
-        <h3 style={{ textAlign: "center", fontFamily: DISPLAY, fontWeight: 500, fontSize: 23, marginBottom: 6 }}>Generating zero-knowledge proof</h3>
-        <p style={{ textAlign: "center", fontSize: 13, color: "#8A857B", marginBottom: 28, lineHeight: 1.5 }}>This runs locally in your browser and may take a few seconds.<br />Please keep this tab open.</p>
+        <h3 style={{ textAlign: "center", fontFamily: DISPLAY, fontWeight: 500, fontSize: T.xl, marginBottom: 6 }}>Generating zero-knowledge proof</h3>
+        <p style={{ textAlign: "center", fontSize: T.sm, color: "#8A857B", marginBottom: 28, lineHeight: 1.5 }}>This runs locally in your browser and may take a few seconds.<br />Please keep this tab open.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {steps.map((st, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 14px", borderRadius: 10, background: st.s.bg }}>
-              <span style={{ width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", fontSize: 12, fontWeight: 700, background: st.s.dot, color: "#0A0A0B" }}>{st.s.mark}</span>
-              <span style={{ fontSize: 14, color: st.s.text }}>{st.label}</span>
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 14px", borderRadius: R.card, background: st.s.bg }}>
+              <span style={{ width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", fontSize: T.sm, fontWeight: 700, background: st.s.dot, color: "#0A0A0B" }}>{st.s.mark}</span>
+              <span style={{ fontSize: T.base, color: st.s.text }}>{st.label}</span>
             </div>
           ))}
         </div>
@@ -2871,11 +2929,11 @@ function ProofOverlay({ stage }: { stage: number }) {
 function Toast({ msg }: { msg: NonNullable<ToastMsg> }) {
   const ok = msg.tone === "ok";
   return (
-    <div style={{ position: "fixed", bottom: 32, left: "50%", zIndex: 120, display: "flex", alignItems: "center", gap: 12, background: "#141413", border: `1px solid ${ok ? "rgba(201,168,106,0.32)" : "rgba(196,93,74,0.45)"}`, borderRadius: 12, padding: "14px 20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)", animation: "vsToast .4s cubic-bezier(.2,.7,.2,1) both", maxWidth: 460 }}>
-      <span style={{ width: 26, height: 26, borderRadius: "50%", background: ok ? "rgba(127,176,105,0.15)" : "rgba(196,93,74,0.15)", border: `1px solid ${ok ? "rgba(127,176,105,0.5)" : "rgba(196,93,74,0.5)"}`, display: "flex", alignItems: "center", justifyContent: "center", color: ok ? "#7FB069" : "#C45D4A", fontSize: 13, flex: "none" }}>{ok ? "✓" : "!"}</span>
+    <div style={{ position: "fixed", bottom: 32, left: "50%", zIndex: 120, display: "flex", alignItems: "center", gap: 12, background: "#141413", border: `1px solid ${ok ? "rgba(201,168,106,0.32)" : "rgba(196,93,74,0.45)"}`, borderRadius: R.card, padding: "14px 20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)", animation: "vsToast .4s cubic-bezier(.2,.7,.2,1) both", maxWidth: 460 }}>
+      <span style={{ width: 26, height: 26, borderRadius: "50%", background: ok ? "rgba(127,176,105,0.15)" : "rgba(196,93,74,0.15)", border: `1px solid ${ok ? "rgba(127,176,105,0.5)" : "rgba(196,93,74,0.5)"}`, display: "flex", alignItems: "center", justifyContent: "center", color: ok ? "#7FB069" : "#C45D4A", fontSize: T.sm, flex: "none" }}>{ok ? "✓" : "!"}</span>
       <div>
-        <div style={{ fontSize: 14, color: "#ECE7DD", fontWeight: 600 }}>{msg.title}</div>
-        <div style={{ fontSize: 12, color: "#8A857B" }}>{msg.sub}</div>
+        <div style={{ fontSize: T.base, color: "#ECE7DD", fontWeight: 600 }}>{msg.title}</div>
+        <div style={{ fontSize: T.sm, color: "#8A857B" }}>{msg.sub}</div>
       </div>
     </div>
   );
