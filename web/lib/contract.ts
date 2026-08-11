@@ -155,6 +155,7 @@ const VAULT_ERRORS: Record<number, string> = {
   30: "Turn on on-chain verification before approving anonymously.",
   31: "That address already owns this vault.",
   32: "The signer set changed after this was proposed — propose it again.",
+  33: "This proposal takes the other kind of approval — transparent proposals are signed, private ones are proven.",
 };
 
 /**

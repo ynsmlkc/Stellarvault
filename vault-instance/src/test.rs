@@ -99,7 +99,7 @@ fn test_create_and_query() {
     assert!(s.vault.is_signer(&s.signer(1)));
     assert!(!s.vault.is_signer(&Address::generate(&s.env)));
     assert_eq!(s.vault.get_balance(), 0);
-    assert_eq!(s.vault.version(), 9);
+    assert_eq!(s.vault.version(), 10);
 }
 
 #[test]
@@ -1489,4 +1489,157 @@ fn test_a_failed_upgrade_leaves_everything_alone() {
 
     assert_eq!(s.vault.retired_before(), 0, "nothing retired");
     s.vault.approve(&tx, &s.signer(0)); // and the proposal is untouched
+}
+
+/* ================= one signer, one approval =================
+
+Three ways a single signer reached an m-of-n threshold alone. All three share
+a root cause: `approval_count` is one number, but the guards that protect it
+are separate ledgers that never consult each other.
+
+  - `approve`        writes DataKey::Approval(tx_id, signer)
+  - `approve_zk`     writes DataKey::Nullifier(nullifier)
+  - `approve_zk_anon` writes DataKey::Nullifier(nullifier)
+
+Nothing binds the first to the other two, the nullifier is caller-supplied,
+and with no ZkConfig set `check_proof` returns Ok without reading any of it.
+
+Each test below asserts the rule the vault is supposed to enforce — one
+counted approval per signer per proposal — so each one fails until the guards
+are unified. Proven against a live 2-of-3 vault before being written: one
+signer moved the whole balance in every case. */
+
+/// The BN254 scalar field modulus, `r`.
+///
+/// `Bn254Fr::from_u256` reduces mod `r` silently, so `n` and `n + r` are the
+/// same field element to the verifier and two different storage keys to the
+/// vault. A nullifier is only a replay guard if the value the vault stores is
+/// the value the proof commits to.
+fn fr_modulus(env: &Env) -> U256 {
+    U256::from_be_bytes(
+        env,
+        &Bytes::from_array(
+            env,
+            &[
+                0x30, 0x64, 0x4E, 0x72, 0xE1, 0x31, 0xA0, 0x29, 0xB8, 0x50, 0x45, 0xB6, 0x81,
+                0x81, 0x58, 0x5D, 0x28, 0x33, 0xE8, 0x48, 0x79, 0xB9, 0x70, 0x91, 0x43, 0xE1,
+                0xF5, 0x93, 0xF0, 0x00, 0x00, 0x01,
+            ],
+        ),
+    )
+}
+
+/// A ZK approval carrying an arbitrary nullifier, public inputs matching it.
+fn zk_with_nullifier(s: &Setup, tx_id: u64, nullifier: U256) -> ZKApproval {
+    let limb = |v: u32| -> BytesN<32> {
+        let mut b = [0u8; 32];
+        b[28..].copy_from_slice(&v.to_be_bytes());
+        BytesN::from_array(&s.env, &b)
+    };
+    let mut n_bytes = [0u8; 32];
+    nullifier.to_be_bytes().copy_into_slice(&mut n_bytes);
+    let mut inputs = Vec::new(&s.env);
+    inputs.push_back(limb(VAULT_ID));
+    inputs.push_back(limb(tx_id as u32));
+    inputs.push_back(limb(SIGNER_ROOT));
+    inputs.push_back(BytesN::from_array(&s.env, &n_bytes));
+    ZKApproval { proof: Bytes::from_array(&s.env, &[7u8; 256]), public_inputs: inputs, nullifier }
+}
+
+/// With no verifier configured, `check_proof` returns Ok without looking at
+/// anything — so the nullifier, which the caller chooses, is the only thing
+/// standing between one signer and the whole threshold.
+///
+/// Every vault the factory deploys starts in this state.
+#[test]
+fn test_unverified_approvals_still_count_once_per_signer() {
+    let s = setup(2); // 2-of-3
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let elsewhere = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &elsewhere, &1_000, &true);
+
+    let first = ZKApproval {
+        proof: Bytes::from_array(&s.env, &[1u8]),
+        public_inputs: Vec::new(&s.env),
+        nullifier: U256::from_u32(&s.env, 0xAA),
+    };
+    s.vault.approve_zk(&tx, &s.signer(0), &first);
+
+    // same signer, a nullifier they simply made up
+    let second = ZKApproval {
+        proof: Bytes::from_array(&s.env, &[1u8]),
+        public_inputs: Vec::new(&s.env),
+        nullifier: U256::from_u32(&s.env, 0xBB),
+    };
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &second),
+        Err(Ok(Error::AlreadyApproved)),
+        "a second approval from the same signer must not count"
+    );
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+    assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err(), "one signer is not two");
+    assert_eq!(s.token.balance(&elsewhere), 0);
+}
+
+/// The transparent and the ZK channel both raise `approval_count` and neither
+/// knows the other exists, so a signer can approve once through each.
+///
+/// This one survives with verification fully enabled and a real proof: the
+/// signer's commitment is a published leaf, so their proof is legitimate. The
+/// approval is counted twice because it is recorded in two places.
+#[test]
+fn test_a_signer_cannot_approve_transparently_and_again_by_proof() {
+    let s = setup(2);
+    with_verifier(&s, true);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let elsewhere = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &elsewhere, &1_000, &false);
+
+    s.vault.approve(&tx, &s.signer(0));
+    // Refused as the wrong channel rather than as a repeat: a transparent
+    // proposal has no ZK door at all, which also closes it to `approve_zk_anon`
+    // — the one path where no address exists to dedup against.
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(0), &zk_for(&s, tx, 1)),
+        Err(Ok(Error::WrongApprovalMode)),
+        "the same signer, through the other door, is still the same signer"
+    );
+    assert_eq!(
+        s.vault.try_approve_zk_anon(&tx, &zk_for(&s, tx, 2)),
+        Err(Ok(Error::WrongApprovalMode)),
+        "and nobody may approve a transparent proposal anonymously"
+    );
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+    assert!(s.vault.try_execute(&tx, &s.signer(0)).is_err());
+    assert_eq!(s.token.balance(&elsewhere), 0);
+}
+
+/// A public input at or above `r` is not a field element, and treating it as
+/// one lets a single proof be spent repeatedly.
+///
+/// The host reduces mod `r` on the way into the verifier, so `n` and `n + r`
+/// prove the same statement; the vault stores the raw `U256`, so they are two
+/// different nullifiers. The same proof bytes therefore count again. Since
+/// `r` is a little under half of `U256::MAX`, there is room for several such
+/// shifts — more than enough for any real threshold — and `approve_zk_anon`
+/// takes no auth at all, so anyone who reads a submitted proof can do this.
+#[test]
+fn test_public_inputs_above_the_field_modulus_are_refused() {
+    let s = setup(2);
+    with_verifier(&s, true);
+    s.token_admin.mint(&s.vault_addr, &1_000);
+    let elsewhere = Address::generate(&s.env);
+    let tx = s.vault.propose(&s.signer(0), &elsewhere, &1_000, &true);
+
+    s.vault.approve_zk(&tx, &s.signer(0), &zk_for(&s, tx, 1));
+
+    // n + r: the same field element, a different storage key
+    let shifted = fr_modulus(&s.env).add(&U256::from_u32(&s.env, 1));
+    assert_eq!(
+        s.vault.try_approve_zk(&tx, &s.signer(1), &zk_with_nullifier(&s, tx, shifted)),
+        Err(Ok(Error::PublicInputMismatch)),
+        "a value at or above the modulus is not a nullifier the vault may store"
+    );
+    assert_eq!(s.vault.get_proposal(&tx).approval_count, 1);
+    assert_eq!(s.token.balance(&elsewhere), 0);
 }

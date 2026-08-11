@@ -67,7 +67,8 @@ const RETIRED: Symbol = symbol_short!("retired");
 ///   7 — a signer-set change retires the proposals it would have decided
 ///   8 — retired proposals are visible as such, and any signer can clear them
 ///   9 — an upgrade retires them too: new code can redefine what state means
-const VERSION: u32 = 9;
+///  10 — one signer, one approval: the channels share a ledger and a mode
+const VERSION: u32 = 10;
 
 /// ~5s per ledger => one day. Used when `Policy.cap_window_ledgers` is 0.
 const DEFAULT_CAP_WINDOW: u32 = 17_280;
@@ -139,6 +140,11 @@ pub enum Error {
     /// The signer set changed after this proposal was made, so the approvals it
     /// holds were given by a different group. It has to be proposed again.
     SignerSetChanged = 32,
+    // --- approval channels ---
+    /// A transparent proposal was approved by proof, or a private one by
+    /// signature. A proposal accepts one kind, so that one signer cannot be
+    /// counted once through each.
+    WrongApprovalMode = 33,
 }
 
 #[contracttype]
@@ -584,6 +590,9 @@ impl VaultInstance {
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
         Self::require_current_set(&env, tx_id)?;
+        if p.private_mode {
+            return Err(Error::WrongApprovalMode);
+        }
         if env.storage().persistent().has(&DataKey::Approval(tx_id, signer.clone())) {
             return Err(Error::AlreadyApproved);
         }
@@ -639,6 +648,18 @@ impl VaultInstance {
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
         Self::require_current_set(&env, tx_id)?;
+        if !p.private_mode {
+            return Err(Error::WrongApprovalMode);
+        }
+        // This entry point names its signer — `require_auth` above — so the
+        // per-address ledger applies to it exactly as it does to `approve`.
+        // Without this, one signer reached any threshold alone: the nullifier
+        // is theirs to choose, and with no verifier configured `check_proof`
+        // returns before reading it.
+        let ak = DataKey::Approval(tx_id, signer.clone());
+        if env.storage().persistent().has(&ak) {
+            return Err(Error::AlreadyApproved);
+        }
         let nk = DataKey::Nullifier(zk.nullifier.clone());
         if env.storage().persistent().has(&nk) {
             return Err(Error::NullifierUsed); // double-vote
@@ -647,6 +668,8 @@ impl VaultInstance {
             return Err(Error::EmptyProof);
         }
         Self::check_proof(&env, tx_id, &zk)?;
+        env.storage().persistent().set(&ak, &true);
+        Self::bump_key(&env, &ak);
         env.storage().persistent().set(&nk, &true);
         Self::bump_key(&env, &nk);
         p.approval_count += 1;
@@ -681,6 +704,12 @@ impl VaultInstance {
         let mut p = Self::proposal(&env, tx_id)?;
         Self::require_open(&env, tx_id, &p)?;
         Self::require_current_set(&env, tx_id)?;
+        // No address to dedup against here — that is the point of the entry
+        // point. The nullifier is the only ledger, so the proposal must not
+        // also be reachable through the one keyed by address.
+        if !p.private_mode {
+            return Err(Error::WrongApprovalMode);
+        }
 
         let nk = DataKey::Nullifier(zk.nullifier.clone());
         if env.storage().persistent().has(&nk) {
@@ -1306,6 +1335,21 @@ impl VaultInstance {
     /// proof and approve one proposal as many times as they liked — reaching
     /// the threshold alone. Verifying the proof without this check would buy
     /// nothing.
+    /// The BN254 scalar field modulus, `r`. Public inputs must be below it.
+    fn fr_modulus(env: &Env) -> U256 {
+        U256::from_be_bytes(
+            env,
+            &Bytes::from_array(
+                env,
+                &[
+                    0x30, 0x64, 0x4E, 0x72, 0xE1, 0x31, 0xA0, 0x29, 0xB8, 0x50, 0x45, 0xB6, 0x81,
+                    0x81, 0x58, 0x5D, 0x28, 0x33, 0xE8, 0x48, 0x79, 0xB9, 0x70, 0x91, 0x43, 0xE1,
+                    0xF5, 0x93, 0xF0, 0x00, 0x00, 0x01,
+                ],
+            ),
+        )
+    }
+
     fn check_proof(env: &Env, tx_id: u64, zk: &ZKApproval) -> Result<(), Error> {
         let cfg: ZkConfig = match env.storage().instance().get(&VERIFIER) {
             Some(c) => c,
@@ -1316,12 +1360,21 @@ impl VaultInstance {
             return Err(Error::PublicInputMismatch);
         }
         // the verifier takes field elements, the wire format is 32-byte limbs
+        let r = Self::fr_modulus(env);
         let mut inputs: Vec<U256> = Vec::new(env);
         for limb in zk.public_inputs.iter() {
-            inputs.push_back(U256::from_be_bytes(
-                env,
-                &Bytes::from_array(env, &limb.to_array()),
-            ));
+            let v = U256::from_be_bytes(env, &Bytes::from_array(env, &limb.to_array()));
+            // A value at or above `r` is not a field element. The host reduces
+            // mod `r` on the way into the verifier, so `n` and `n + r` prove
+            // the same statement — but the vault stores the raw U256, so they
+            // are two different nullifiers and one proof counts twice. `r` is
+            // a little under half of U256::MAX, leaving room for several such
+            // shifts, and `approve_zk_anon` takes no auth, so anyone who reads
+            // a submitted proof could spend it again.
+            if v >= r {
+                return Err(Error::PublicInputMismatch);
+            }
+            inputs.push_back(v);
         }
 
         // [vaultId, txId, signerRoot, nullifier] — all four are ours to dictate
