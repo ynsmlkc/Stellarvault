@@ -130,12 +130,6 @@ type Mode = "transparent" | "private";
 type ToastMsg = { title: string; sub: string; tone: "ok" | "err" } | null;
 
 /* ============================ helpers ============================ */
-function parseAmountToStroops(s: string): bigint {
-  const clean = s.replace(/,/g, "").trim();
-  const n = Number(clean);
-  if (!isFinite(n) || n <= 0) throw new Error("Enter a valid amount");
-  return BigInt(Math.round(n * 1e7));
-}
 const letterFor = (i: number) => String.fromCharCode(65 + (i % 26));
 
 function Avatar({ letter, grad, size = 26, border, ml = 0, muted = false }: { letter: string; grad?: string; size?: number; border?: string; ml?: number; muted?: boolean }) {
@@ -377,7 +371,7 @@ export default function Page() {
     if (!w) return;
     let stroops: bigint;
     try {
-      stroops = parseAmountToStroops(amountStr);
+      stroops = toStroops(amountStr);
     } catch (e: any) {
       showToast({ title: "Invalid amount", sub: e.message, tone: "err" });
       return;
@@ -530,7 +524,7 @@ export default function Page() {
     if (!w) return;
     setBusy("deposit");
     try {
-      await depositToVault(vaultAddress, w, parseAmountToStroops("100"));
+      await depositToVault(vaultAddress, w, toStroops("100"));
       await loadData();
       showToast({ title: "Deposited 100 XLM", sub: "Vault balance updated.", tone: "ok" });
     } catch (e: any) {
@@ -833,8 +827,14 @@ function ledgersToHuman(n: number): string {
   if (secs < 172800) return `${(secs / 3600).toFixed(secs < 36000 ? 1 : 0)} h`;
   return `${(secs / 86400).toFixed(1)} days`;
 }
-// Amounts are parsed by `toStroops` only — see the note on it. A float parser
-// used to live here, and `"1,5"` reached the chain as 15 XLM.
+// Amounts are parsed by `toStroops` only — see the note on it.
+//
+// There were two float parsers, not one. Removing `stroopsFromXlm` left
+// `parseAmountToStroops` on the single-payment path, which is the most-used
+// path in the app: `Number("1,5") * 1e7` proposed 15 XLM. The review panel
+// beside it totals with `toStroopsSafe`, which refuses the same string, so it
+// displayed 0.00 while 15 XLM went to the chain — the one screen built to show
+// a co-signer what they are approving, disagreeing with what was proposed.
 
 /** Why "Execute" is unavailable right now, or null when it's clear to go. */
 function executeBlocker(p: Proposal, st: ProposalStatus | undefined, policy: Policy, balance: bigint | null): string | null {

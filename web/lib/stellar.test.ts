@@ -105,3 +105,28 @@ describe("address shorteners", () => {
     expect(shortContract(c)).toBe("CANC…AOY2");
   });
 });
+
+describe("the amount parser is the only amount parser", () => {
+  // Two float parsers existed, not one. Removing `stroopsFromXlm` from
+  // page.tsx left `parseAmountToStroops` on the single-payment path — the
+  // most-used path in the app — where Number("1,5") * 1e7 proposed 15 XLM,
+  // while the review panel beside it used toStroops and displayed 0.00. A
+  // grep is a blunt test, but the failure was that nobody was looking.
+  it("no float-scaled parser survives in the app source", async () => {
+    const fs = await import("node:fs/promises");
+    const sources = ["app/page.tsx", "app/confidential.tsx", "lib/contract.ts"];
+    for (const f of sources) {
+      const src = await fs.readFile(f, "utf8");
+      const code = src
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("//") && !l.trimStart().startsWith("*"))
+        .join("\n");
+      expect(code, `${f} scales an amount through a float`).not.toMatch(/\*\s*1e7/);
+    }
+  });
+
+  it("refuses the input that made the two disagree", () => {
+    expect(() => toStroops("1,5")).toThrow();
+    expect(toStroopsSafe("1,5")).toBeNull();
+  });
+});
