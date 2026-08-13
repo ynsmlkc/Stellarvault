@@ -394,3 +394,62 @@ Verified live on CDO5MM5RA46SQMTAIPTPRCZYJ3UGNHHUJA6D4K35ONI3N2DDZTGLEBPL
 
 Existing vaults stay on the code they were deployed with. A vault still on v9
 now reports two gaps in the app's upgrade notice rather than one.
+
+================================================================================
+v12 + v13 — the half-fixes finished, and the clock the lock runs on
+================================================================================
+
+WASM      3109f7f4946c1ed806479f47443208bd34d7b2ca3d8fd8cb303b59cde01d78de
+uploaded  tx 7fdbab2c54703ed2a479a874d1ae971b2307765fc64cca6c6b648af7fa592dbe
+factory   tx c334f6ed28f55b2454277130a40c9cd13bc993ee341061582865ecec0e40e30d
+
+The first set_wasm attempt returned "transaction submission timeout". It had
+not landed — `get_wasm` still read the v11 hash 20s later — and the retry above
+is what took. Worth recording because the operation is idempotent, so a
+timeout here is safe to retry; a timeout on create_vault would not be.
+
+v12 closed three guards v11 had only half-fixed. The v11 commit named the four
+checks the call branch skipped and closed two of them, so a call could still
+pay an address the recipient allowlist refused. The cap window was anchored to
+the first spend, which moved the boundary rather than removing it — the spender
+places it, so 1 stroop opens a window, 999 fills it, and one ledger later the
+whole cap is free again; it is a sliding-window counter now, and it seeds
+itself from the pre-v11 DataKey::Spent bucket so an upgrade no longer returns a
+budget already spent. And the duplicate-signer check had gone into
+__constructor, which does not run on an upgrade — the removal guard now counts
+the set it actually leaves behind.
+
+v13 put the time-lock on the right clock. It was restamped on every approval,
+so each one past the threshold bought another full lock period and a signer who
+could not block a proposal could postpone it by approving it. And a proposal
+that never met its old threshold had no moment of passing recorded at all, so
+lowering the threshold made it pass and become executable in the same instant.
+
+Verified live on CB6SGXQVXKDCDSXCWDUXMUVN4X4DLRUJ7PKOQ5YEASW5T3EPIOAN4LKX
+(throwaway keys, no user funds), grown from 2-of-2 to 2-of-3:
+
+  version()                                     -> 13
+  RemoveSigner on a 2-of-2                      -> Error(Contract, #2)  BadThreshold,
+                                                   refused at propose, so a doomed
+                                                   proposal never collects approvals
+  allowlist_only on, one address allowed:
+    propose(stranger, 500)                      -> Error(Contract, #17) RecipientNotAllowed
+    propose_call(token,"transfer",[v,stranger,500])
+      accepted as a call, approved 2-of-2,
+      execute                                   -> Error(Contract, #17) RecipientNotAllowed
+    vault balance before/after                  -> 5000 / 5000
+
+  time-lock 12 ledgers, proposal #6:
+    passed 2-of-2 at ledger 4122643             -> unlock_ledger 4122655  (= +12)
+    execute immediately                         -> Error(Contract, #16) TimelockActive
+    a THIRD approval at ledger 4122648          -> approval_count 2 -> 3,
+                                                   unlock_ledger STILL 4122655
+    execute at 4122662                          -> ok, balance 5000 -> 4900
+
+The third approval is the whole point: under v11 it would have pushed the
+unlock to 4122660. The lock now starts when the proposal passes and later
+approvals leave it alone.
+
+Not covered live, only by unit test: the sliding window's fade across a
+boundary, the legacy-bucket seeding on upgrade, and the threshold-change clock
+reset. Each needs ledger control the network does not give.
